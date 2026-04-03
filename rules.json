@@ -1,0 +1,97 @@
+{
+  "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD"],
+  "default_timeframe": "240",
+
+  "bias_criteria": {
+    "bullish": [
+      "Ribbon direction is up (bullish colour)",
+      "Price is above the 20 EMA on the 4H",
+      "RSI is below 60 (room to run)",
+      "Fractal correlation > 0.7 AND fractal phase is recovery",
+      "RSI bullish divergence detected (price lower low, RSI higher low)",
+      "MACD histogram turning positive after negative streak",
+      "Price above Bollinger Bands basis (20 SMA)",
+      "Multiple indicators agree on direction (confluence > 60%)"
+    ],
+    "bearish": [
+      "Ribbon direction is down (bearish colour)",
+      "Price is below the 20 EMA on the 4H",
+      "RSI is above 40 (room to drop)",
+      "Fractal correlation > 0.7 AND fractal phase is correction",
+      "RSI bearish divergence detected (price higher high, RSI lower high)",
+      "MACD histogram turning negative after positive streak",
+      "Price below Bollinger Bands basis (20 SMA)",
+      "Volume declining on bounces (low-conviction rally)"
+    ],
+    "neutral": [
+      "Ribbon is flat or mixed",
+      "Price is chopping around the 20 EMA",
+      "RSI is between 45 and 55",
+      "Fractal correlation < 0.4 (pattern not tracking)",
+      "No clear divergences on RSI or MACD",
+      "Confluence score between 40-60% (mixed signals)"
+    ]
+  },
+
+  "fractal_checks": {
+    "enabled": true,
+    "model": "2019_btc_fractal",
+    "ath": 126272,
+    "swing_low": 59930,
+    "ath_date": "2025-06-05",
+    "low_date": "2025-12-06",
+    "correlation_threshold": 0.7,
+    "deviation_alert_pct": 5.0,
+    "phases": {
+      "correction": "Day 0-175 from ATH — expect lower prices, trade cautiously",
+      "recovery": "Day 175+ — watch for base building, accumulation signals"
+    }
+  },
+
+  "key_level_alerts": {
+    "btc": {
+      "invalidation": 60000,
+      "fib_05": 93101,
+      "fib_0618": 100929,
+      "fib_0786": 112075,
+      "bb_basis": 69340,
+      "bb_lower": 64204
+    },
+    "eth": {
+      "invalidation": 1700,
+      "fib_05": 3251,
+      "fib_0618": 3607,
+      "fib_0786": 4114
+    },
+    "proximity_alert_pct": 2.0
+  },
+
+  "divergence_detection": {
+    "enabled": true,
+    "indicators": ["RSI", "MACD", "OBV"],
+    "lookback_bars": 30,
+    "rules": [
+      "Bullish divergence: price makes lower low, indicator makes higher low",
+      "Bearish divergence: price makes higher high, indicator makes lower high",
+      "Hidden bullish: price makes higher low, indicator makes lower low (trend continuation)",
+      "Hidden bearish: price makes lower high, indicator makes higher high (trend continuation)"
+    ],
+    "confluence_scoring": {
+      "method": "Count indicators agreeing on direction, score as percentage",
+      "strong_signal": ">= 75% agreement",
+      "moderate_signal": "50-74% agreement",
+      "weak_signal": "< 50% agreement"
+    }
+  },
+
+  "risk_rules": [
+    "Only take trades where R:R is at least 1:2",
+    "No trading in the first 15 minutes of the NY session open",
+    "Maximum 2 open positions at once",
+    "If I have 2 losing trades in a row, stop for the day",
+    "Reduce position size by 50% when price is within 2% of fractal invalidation level",
+    "No new longs if fractal deviation > -10% (significantly below expected path)"
+  ],
+
+  "notes": "2019 fractal analysis active. BTC currently in recovery phase (Day ~210 from ATH). Price tracking below fractal expected path by ~12.5%. RSI below 50, MACD negative — consistent with 2019 pattern at this stage. Key trigger: RSI reclaiming 50 + MACD crossing positive = recovery confirmation."
+}

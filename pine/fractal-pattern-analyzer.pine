@@ -1,0 +1,229 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Fractal Pattern Analyzer — 2019 BTC Fractal Overlay
+
+//@version=6
+indicator("Fractal Pattern Analyzer", overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ─── INPUTS ─────────────────────────────────────────────────────────────────
+grp_fractal   = "Fractal Settings"
+i_enabled     = input.bool(true, "Enable Fractal Overlay", group=grp_fractal)
+i_corrLen     = input.int(60, "Correlation Lookback (bars)", minval=10, maxval=200, group=grp_fractal)
+i_opacity     = input.int(70, "Overlay Opacity", minval=10, maxval=100, group=grp_fractal)
+
+grp_2019      = "2019 Fractal Reference"
+i_ath         = input.float(126272, "ATH Price", group=grp_2019)
+i_swingLow    = input.float(59930, "Swing Low Price", group=grp_2019)
+i_athDate     = input.time(timestamp("2025-06-05"), "ATH Date", group=grp_2019)
+i_lowDate     = input.time(timestamp("2025-12-06"), "Swing Low Date", group=grp_2019)
+
+grp_style     = "Style"
+i_followCol   = input.color(color.new(#00E676, 0), "Following Fractal", group=grp_style)
+i_divergeCol  = input.color(color.new(#FF5252, 0), "Diverging from Fractal", group=grp_style)
+i_threshold   = input.float(3.0, "Divergence Threshold (%)", minval=0.5, maxval=20.0, step=0.5, group=grp_style)
+
+// ─── 2019 FRACTAL DATA ─────────────────────────────────────────────────────
+// Normalized daily returns from BTC 2019 cycle: 175-day correction then recovery
+// Data: percent change from ATH at each day offset (0 = ATH, 175 = swing low)
+// Sampled at key inflection points, interpolated between
+
+// The fractal path as % of ATH (key points in the 175-day correction + 60-day recovery)
+// Day offsets from ATH and corresponding price as % of ATH
+fractalDays   = array.new_int()
+fractalPcts   = array.new_float()
+
+// Build the fractal path (2019 structure mapped to current cycle)
+// Correction phase (0-175 days from ATH)
+initFractal() =>
+    var int[] days = array.new_int()
+    var float[] pcts = array.new_float()
+    if barstate.isfirst
+        // Wave 1 down: ATH to first support
+        array.push(days, 0)
+        array.push(pcts, 100.0)      // ATH
+        array.push(days, 10)
+        array.push(pcts, 89.5)       // -10.5% initial drop
+        array.push(days, 20)
+        array.push(pcts, 78.3)       // Wave 1 low
+
+        // Wave 2 up: relief rally
+        array.push(days, 30)
+        array.push(pcts, 84.2)       // Wave 2 high
+        array.push(days, 35)
+        array.push(pcts, 80.1)
+
+        // Wave 3 down: main selling
+        array.push(days, 50)
+        array.push(pcts, 74.6)       // Mid wave 3
+        array.push(days, 65)
+        array.push(pcts, 69.8)
+        array.push(days, 80)
+        array.push(pcts, 63.8)       // Wave 3 low
+
+        // Wave 4 up: dead cat bounce
+        array.push(days, 95)
+        array.push(pcts, 77.6)       // Wave 4 high
+        array.push(days, 105)
+        array.push(pcts, 73.2)
+
+        // Wave 5 down: capitulation
+        array.push(days, 120)
+        array.push(pcts, 65.4)
+        array.push(days, 140)
+        array.push(pcts, 58.2)
+        array.push(days, 160)
+        array.push(pcts, 52.1)
+        array.push(days, 175)
+        array.push(pcts, 47.5)       // Swing low (-52.5%)
+
+        // Recovery phase (175-235 days)
+        array.push(days, 180)
+        array.push(pcts, 55.8)       // Initial bounce
+        array.push(days, 185)
+        array.push(pcts, 54.8)       // Pullback
+        array.push(days, 190)
+        array.push(pcts, 49.5)       // Retest low area
+        array.push(days, 200)
+        array.push(pcts, 53.9)       // Higher low bounce
+        array.push(days, 210)
+        array.push(pcts, 56.2)       // Building base
+        array.push(days, 220)
+        array.push(pcts, 58.7)       // Breakout start
+        array.push(days, 235)
+        array.push(pcts, 60.3)       // Early recovery
+    [days, pcts]
+
+[fDays, fPcts] = initFractal()
+
+// ─── INTERPOLATE FRACTAL VALUE ──────────────────────────────────────────────
+getFractalPct(int dayOffset) =>
+    float result = na
+    int sz = array.size(fDays)
+    if sz > 0
+        if dayOffset <= array.get(fDays, 0)
+            result := array.get(fPcts, 0)
+        else if dayOffset >= array.get(fDays, sz - 1)
+            result := array.get(fPcts, sz - 1)
+        else
+            for i = 0 to sz - 2
+                int d0 = array.get(fDays, i)
+                int d1 = array.get(fDays, i + 1)
+                if dayOffset >= d0 and dayOffset < d1
+                    float p0 = array.get(fPcts, i)
+                    float p1 = array.get(fPcts, i + 1)
+                    float t = (dayOffset - d0) / (d1 - d0)
+                    result := p0 + t * (p1 - p0)
+                    break
+    result
+
+// ─── CALCULATE DAY OFFSET FROM ATH ─────────────────────────────────────────
+msPerDay   = 86400000
+dayOffset  = math.floor((time - i_athDate) / msPerDay)
+
+// ─── GET FRACTAL EXPECTED PRICE ─────────────────────────────────────────────
+fractalPct   = getFractalPct(dayOffset)
+fractalPrice = not na(fractalPct) ? i_ath * fractalPct / 100.0 : na
+
+// ─── PLOT FRACTAL OVERLAY ───────────────────────────────────────────────────
+plot(i_enabled and not na(fractalPrice) ? fractalPrice : na,
+     "Fractal Path", color=color.new(#FFD700, 100 - i_opacity),
+     linewidth=2, style=plot.style_line)
+
+// ─── DEVIATION FROM FRACTAL ─────────────────────────────────────────────────
+deviation = not na(fractalPrice) and fractalPrice != 0 ?
+     (close - fractalPrice) / fractalPrice * 100.0 : na
+
+bool isFollowing = not na(deviation) ? math.abs(deviation) <= i_threshold : false
+bool isAbove     = not na(deviation) ? deviation > i_threshold : false
+bool isBelow     = not na(deviation) ? deviation < -i_threshold : false
+
+// ─── COLOR BARS ─────────────────────────────────────────────────────────────
+barcolor(not i_enabled ? na :
+     isFollowing ? i_followCol :
+     isAbove ? color.new(#2196F3, 20) :
+     isBelow ? i_divergeCol : na)
+
+// ─── CORRELATION COEFFICIENT ────────────────────────────────────────────────
+// Calculate rolling correlation between actual price and fractal expected price
+var float[] actualArr  = array.new_float()
+var float[] expectArr  = array.new_float()
+
+if not na(fractalPrice) and i_enabled
+    array.push(actualArr, close)
+    array.push(expectArr, fractalPrice)
+    if array.size(actualArr) > i_corrLen
+        array.shift(actualArr)
+        array.shift(expectArr)
+
+correlation = array.size(actualArr) >= 20 ? array.covariance(actualArr, expectArr) /
+     (array.stdev(actualArr) * array.stdev(expectArr)) : na
+
+// ─── INFO TABLE ─────────────────────────────────────────────────────────────
+var table infoTable = table.new(position.top_right, 2, 8,
+     bgcolor=color.new(#1a1a2e, 10), border_width=1, border_color=color.new(#333333, 0))
+
+if barstate.islast and i_enabled
+    // Header
+    table.cell(infoTable, 0, 0, "Fractal Analyzer", text_color=color.new(#FFD700, 0),
+         text_size=size.normal, text_halign=text.align_left, bgcolor=color.new(#0d0d1a, 0))
+    table.cell(infoTable, 1, 0, "2019 Pattern", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_right, bgcolor=color.new(#0d0d1a, 0))
+
+    // Correlation
+    corrColor = not na(correlation) ? (correlation > 0.7 ? color.new(#00E676, 0) :
+         correlation > 0.4 ? color.new(#FFD700, 0) : color.new(#FF5252, 0)) : color.gray
+    corrStr = not na(correlation) ? str.tostring(correlation, "#.###") : "N/A"
+    table.cell(infoTable, 0, 1, "Correlation", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 1, corrStr, text_color=corrColor,
+         text_size=size.normal, text_halign=text.align_right)
+
+    // Day offset
+    table.cell(infoTable, 0, 2, "Day from ATH", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 2, str.tostring(dayOffset), text_color=color.white,
+         text_size=size.small, text_halign=text.align_right)
+
+    // Expected price
+    table.cell(infoTable, 0, 3, "Fractal Price", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 3, not na(fractalPrice) ? "$" + str.tostring(fractalPrice, "#,###") : "N/A",
+         text_color=color.new(#FFD700, 0), text_size=size.small, text_halign=text.align_right)
+
+    // Actual price
+    table.cell(infoTable, 0, 4, "Actual Price", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 4, "$" + str.tostring(close, "#,###"),
+         text_color=color.white, text_size=size.small, text_halign=text.align_right)
+
+    // Deviation
+    devColor = not na(deviation) ? (math.abs(deviation) <= i_threshold ? color.new(#00E676, 0) :
+         deviation > 0 ? color.new(#2196F3, 0) : color.new(#FF5252, 0)) : color.gray
+    devStr = not na(deviation) ? str.tostring(deviation, "#.#") + "%" : "N/A"
+    table.cell(infoTable, 0, 5, "Deviation", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 5, devStr, text_color=devColor,
+         text_size=size.small, text_halign=text.align_right)
+
+    // Status
+    statusStr = not na(deviation) ? (math.abs(deviation) <= i_threshold ? "TRACKING" :
+         deviation > 0 ? "ABOVE FRACTAL" : "BELOW FRACTAL") : "NO DATA"
+    statusColor = not na(deviation) ? (math.abs(deviation) <= i_threshold ? color.new(#00E676, 0) :
+         deviation > 0 ? color.new(#2196F3, 0) : color.new(#FF5252, 0)) : color.gray
+    table.cell(infoTable, 0, 6, "Status", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 6, statusStr, text_color=statusColor,
+         text_size=size.normal, text_halign=text.align_right)
+
+    // Phase
+    phaseStr = dayOffset < 0 ? "PRE-ATH" : dayOffset <= 175 ? "CORRECTION (Day " + str.tostring(dayOffset) + "/175)" : "RECOVERY (Day " + str.tostring(dayOffset - 175) + ")"
+    table.cell(infoTable, 0, 7, "Phase", text_color=color.new(#AAAAAA, 0),
+         text_size=size.small, text_halign=text.align_left)
+    table.cell(infoTable, 1, 7, phaseStr, text_color=color.new(#E040FB, 0),
+         text_size=size.small, text_halign=text.align_right)
+
+// ─── DEVIATION FILL ─────────────────────────────────────────────────────────
+p1 = plot(i_enabled and not na(fractalPrice) ? close : na, "Actual", color=color.new(color.white, 100))
+p2 = plot(i_enabled and not na(fractalPrice) ? fractalPrice : na, "Expected", color=color.new(color.white, 100))
+fill(p1, p2, color=isFollowing ? color.new(#00E676, 85) :
+     isAbove ? color.new(#2196F3, 85) :
+     isBelow ? color.new(#FF5252, 85) : color.new(color.gray, 95))
