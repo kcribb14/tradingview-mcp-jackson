@@ -17,7 +17,7 @@ register('screener', {
       handler: (opts) => core.read({ max_rows: opts.max ? Number(opts.max) : 100, view: opts.view }),
     }],
     ['sort', {
-      description: 'Sort screener by column',
+      description: 'Sort screener by column (uses React fiber — reliable)',
       options: {
         order: { type: 'string', description: 'Sort order: asc or desc (default desc)' },
       },
@@ -25,6 +25,10 @@ register('screener', {
         if (!positionals[0]) throw new Error('Column name required. Usage: tv screener sort "Market cap" --order desc');
         return core.sort({ column: positionals.join(' '), order: opts.order || 'desc' });
       },
+    }],
+    ['get-sort', {
+      description: 'Get current screener sort state',
+      handler: () => core.getSort(),
     }],
     ['filter', {
       description: 'Open a filter pill to view/set options',

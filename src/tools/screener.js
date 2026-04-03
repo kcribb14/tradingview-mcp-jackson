@@ -16,11 +16,16 @@ export function registerScreenerTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('screener_sort', 'Sort the screener by any column. Click a column header to sort.', {
-    column: z.string().describe('Column header text to sort by (e.g., "Market cap", "Change %", "P/E", "Volume")'),
-    order: z.enum(['asc', 'desc']).optional().describe('Sort order: "desc" (default, single click) or "asc" (double click)'),
+  server.tool('screener_sort', 'Sort the screener by any column. Uses React fiber setSort() for 100% reliability — no DOM clicks.', {
+    column: z.string().describe('Column to sort by. Display names: "Market cap", "Change %", "P/E", "Volume", "Price", "Analyst Rating", "Sector", "EPS", "Div yield %", "Beta", "RSI". Or internal IDs: MarketCap, Change, PriceToEarnings, Volume, etc.'),
+    order: z.enum(['asc', 'desc']).optional().describe('Sort order: "desc" (default) or "asc"'),
   }, async ({ column, order }) => {
     try { return jsonResult(await core.sort({ column, order })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('screener_get_sort', 'Get the current screener sort column and direction.', {}, async () => {
+    try { return jsonResult(await core.getSort()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

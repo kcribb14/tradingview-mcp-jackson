@@ -1,12 +1,20 @@
 /**
  * Core screener logic.
  * Reads and controls the TradingView Stock Screener panel via CDP DOM access.
+ *
+ * Architecture: The screener renders inside an iframe/webview in the chart page.
+ * - Reading (table DOM) works via the chart page's evaluate()
+ * - Sorting requires accessing the screener's own CDP target (separate page at /screener/)
+ *   to walk the React fiber tree and call setSort() directly.
  */
 import { evaluate, getClient } from '../connection.js';
+import CDP from 'chrome-remote-interface';
+
+const CDP_HOST = 'localhost';
+const CDP_PORT = 9222;
 
 /**
- * Find the main screener table in the DOM.
- * Returns a JS expression path for further queries, or throws.
+ * Find the main screener table in the DOM (chart page context).
  */
 const FIND_TABLE = `
 (function() {
@@ -19,16 +27,75 @@ const FIND_TABLE = `
 `;
 
 /**
+ * Column ID mapping: display names → internal screener column IDs.
+ * Used by setSort() to find the right column object in React state.
+ */
+const COLUMN_MAP = {
+  'symbol': 'TickerUniversal',
+  'price': 'Price',
+  'change': 'Change', 'change %': 'Change',
+  'volume': 'Volume',
+  'rel volume': 'RelativeVolume', 'relative volume': 'RelativeVolume',
+  'market cap': 'MarketCap', 'market_cap': 'MarketCap',
+  'p/e': 'PriceToEarnings', 'pe': 'PriceToEarnings',
+  'eps': 'EpsDiluted', 'eps dil': 'EpsDiluted',
+  'eps growth': 'EpsDilutedGrowth', 'eps dil growth': 'EpsDilutedGrowth',
+  'div yield': 'DividendsYield', 'div yield %': 'DividendsYield', 'dividend': 'DividendsYield',
+  'sector': 'Sector',
+  'analyst rating': 'AnalystRating', 'rating': 'AnalystRating',
+  // Technicals
+  'rsi': 'RSI', 'rsi (14)': 'RSI',
+  'tech rating': 'TechRating',
+  'ma rating': 'MARating',
+  // Performance
+  'perf %': 'Performance',
+  'revenue growth': 'RevenueGrowth',
+  'peg': 'PEG',
+  'roe': 'ROE',
+  'beta': 'Beta',
+};
+
+/**
+ * Get a CDP client connected to the screener target (separate from chart).
+ */
+async function getScreenerClient() {
+  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const targets = await resp.json();
+  const screenerTarget = targets.find(t => t.type === 'page' && /screener/i.test(t.url));
+  if (!screenerTarget) return null;
+  const client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: screenerTarget.id });
+  await client.Runtime.enable();
+  return client;
+}
+
+/**
+ * Evaluate JS in the screener's own page context (not the chart page).
+ */
+async function evalInScreener(expression) {
+  const client = await getScreenerClient();
+  if (!client) throw new Error('Screener target not found. Is the screener panel open?');
+  try {
+    const result = await client.Runtime.evaluate({ expression, returnByValue: true });
+    if (result.exceptionDetails) {
+      throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+    }
+    return result.result?.value;
+  } finally {
+    try { await client.close(); } catch {}
+  }
+}
+
+/**
  * Open the screener panel via the bottom-bar button.
  */
 export async function open() {
-  // Check if screener is already open (has a visible table with >2 headers)
+  // Check if screener is already open
   const alreadyOpen = await evaluate(FIND_TABLE);
   if (alreadyOpen >= 0) {
     return { success: true, action: 'already_open', screener_visible: true };
   }
 
-  // Click the screener button to open it
+  // Click the screener button
   const clicked = await evaluate(`
     (function() {
       var btn = document.querySelector('[data-name="screener-dialog-button"]');
@@ -42,32 +109,29 @@ export async function open() {
   }
   await new Promise(r => setTimeout(r, 3000));
 
-  // Verify it opened
-  const tableIdx = await evaluate(FIND_TABLE);
+  // Verify — retry once if needed
+  let tableIdx = await evaluate(FIND_TABLE);
   if (tableIdx < 0) {
-    // Maybe the click closed it instead — try one more click
     await evaluate(`document.querySelector('[data-name="screener-dialog-button"]').click()`);
     await new Promise(r => setTimeout(r, 3000));
+    tableIdx = await evaluate(FIND_TABLE);
   }
 
-  const finalCheck = await evaluate(FIND_TABLE);
-  return { success: true, action: 'opened', screener_visible: finalCheck >= 0 };
+  return { success: true, action: 'opened', screener_visible: tableIdx >= 0 };
 }
 
 /**
  * Read screener results: headers + all visible rows.
- * @param {object} opts
- * @param {number} opts.max_rows - max rows to return (default 100)
- * @param {string} opts.view - screener tab to read: overview, performance, valuation, dividends, technicals, etc.
+ * Reads from the screener's own CDP target for accurate data after sorts.
+ * Falls back to chart page DOM if screener target isn't available.
  */
 export async function read({ max_rows = 100, view } = {}) {
-  // Optionally switch view tab first
   if (view) {
     await switchView(view);
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  const data = await evaluate(`
+  const readExpr = `
     (function() {
       var maxRows = ${max_rows};
       var tables = document.querySelectorAll('table');
@@ -77,22 +141,25 @@ export async function read({ max_rows = 100, view } = {}) {
       }
       if (!table) return { error: 'Screener table not found. Is the screener panel open?' };
 
-      // Read headers
       var headers = [];
       table.querySelectorAll('th').forEach(function(th) {
         var text = th.textContent.trim();
         if (text) headers.push(text);
       });
 
-      // Read rows
       var rows = [];
       var trs = table.querySelectorAll('tbody tr');
       for (var j = 0; j < Math.min(maxRows, trs.length); j++) {
         var cells = [];
-        trs[j].querySelectorAll('td').forEach(function(td) {
-          cells.push(td.textContent.trim());
+        trs[j].querySelectorAll('td').forEach(function(td, idx) {
+          // For Symbol column (first td): extract ticker from dedicated element
+          if (idx === 0) {
+            var tickerEl = td.querySelector('a[class*="tickerNameBox"], a[class*="ticker"]');
+            cells.push(tickerEl ? tickerEl.textContent.trim() : td.textContent.trim());
+          } else {
+            cells.push(td.textContent.trim());
+          }
         });
-        // Build object from headers + cells
         var row = {};
         for (var k = 0; k < headers.length && k < cells.length; k++) {
           row[headers[k]] = cells[k];
@@ -102,25 +169,110 @@ export async function read({ max_rows = 100, view } = {}) {
 
       return { headers: headers, row_count: rows.length, total_visible: trs.length, rows: rows };
     })()
-  `);
+  `;
+
+  // Read from screener target first (always accurate after sort/filter operations).
+  // Falls back to chart page DOM if screener target isn't available.
+  let data;
+  try {
+    data = await evalInScreener(readExpr);
+  } catch {
+    data = await evaluate(readExpr);
+  }
 
   if (data?.error) throw new Error(data.error);
   return { success: true, ...data };
 }
 
 /**
- * Sort the screener by clicking a column header.
- * Clicking once = descending, twice = ascending, three times = default.
- * @param {string} column - column header text to sort by (e.g., "Market cap", "Change %")
- * @param {string} order - "asc" or "desc" (desc = single click, asc = double click)
+ * Sort the screener by calling React's setSort() directly via the fiber tree.
+ * This is 100% reliable — no DOM clicks, no context menus.
+ *
+ * @param {string} column - column name (e.g., "Market cap", "Change %", "P/E", "Volume")
+ * @param {string} order - "asc" or "desc"
  */
 export async function sort({ column, order = 'desc' }) {
-  const clicks = order === 'asc' ? 2 : 1;
+  // Resolve column name to internal ID
+  const colLower = column.toLowerCase().replace(/\s+/g, ' ').replace(/%/g, '').trim();
+  const columnId = COLUMN_MAP[colLower] || column;
 
-  // Step 1: Find the column header's bounding rect
-  const coords = await evaluate(`
+  const result = await evalInScreener(`
     (function() {
-      var col = ${JSON.stringify(column)};
+      // Find the screener table
+      var tables = document.querySelectorAll('table');
+      var table = null;
+      for (var i = 0; i < tables.length; i++) {
+        if (tables[i].querySelectorAll('th').length > 2) { table = tables[i]; break; }
+      }
+      if (!table) return { error: 'Screener table not found in screener target' };
+
+      // Get React fiber
+      var fiberKey = Object.keys(table).find(function(k) {
+        return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance');
+      });
+      if (!fiberKey) return { error: 'React fiber not found on table element' };
+
+      var fiber = table[fiberKey];
+      var current = fiber;
+      var setSort = null;
+      var columns = null;
+
+      // Walk up the fiber tree to find the component with setSort prop
+      for (var i = 0; i < 50 && current; i++) {
+        if (current.memoizedProps) {
+          var props = current.memoizedProps;
+          if (typeof props.setSort === 'function' && props.columns) {
+            setSort = props.setSort;
+            columns = props.columns;
+            break;
+          }
+        }
+        current = current.return;
+      }
+
+      if (!setSort) return { error: 'setSort function not found in React fiber tree' };
+
+      // Find the matching column object
+      var columnId = ${JSON.stringify(columnId)};
+      var direction = ${JSON.stringify(order)};
+      var targetCol = null;
+
+      for (var j = 0; j < columns.length; j++) {
+        var col = columns[j];
+        if (col.id === columnId || (col.id && col.id.toLowerCase() === columnId.toLowerCase())) {
+          targetCol = col;
+          break;
+        }
+      }
+
+      if (!targetCol) {
+        var available = columns.map(function(c) { return c.id; });
+        return { error: 'Column ID not found: ' + columnId + '. Available: ' + available.join(', ') };
+      }
+
+      // Call setSort with the column object and direction
+      setSort(targetCol, direction);
+
+      return {
+        sorted_by: targetCol.id,
+        direction: direction,
+        column_display: ${JSON.stringify(column)}
+      };
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+
+  await new Promise(r => setTimeout(r, 1500));
+  return { success: true, ...result };
+}
+
+/**
+ * Get the current sort state from the screener's React state.
+ */
+export async function getSort() {
+  const result = await evalInScreener(`
+    (function() {
       var tables = document.querySelectorAll('table');
       var table = null;
       for (var i = 0; i < tables.length; i++) {
@@ -128,112 +280,33 @@ export async function sort({ column, order = 'desc' }) {
       }
       if (!table) return { error: 'Screener table not found' };
 
-      var ths = table.querySelectorAll('th');
-      var target = null;
-      var colLower = col.toLowerCase().replace(/\\s+/g, ' ');
-      ths.forEach(function(th) {
-        var txt = th.textContent.trim().replace(/\\s+/g, ' ');
-        if (txt === col || txt.toLowerCase() === colLower) target = th;
+      var fiberKey = Object.keys(table).find(function(k) {
+        return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance');
       });
-      if (!target) {
-        ths.forEach(function(th) {
-          var txt = th.textContent.trim().replace(/\\s+/g, ' ').toLowerCase();
-          if (txt.includes(colLower)) target = th;
-        });
-      }
-      if (!target) {
-        var available = [];
-        ths.forEach(function(th) { var t = th.textContent.trim(); if (t) available.push(t); });
-        return { error: 'Column not found: ' + col + '. Available: ' + available.join(', ') };
-      }
+      if (!fiberKey) return { error: 'React fiber not found' };
 
-      var clickTarget = target.querySelector('div[class*="cellWrapper"]') || target;
-      var rect = clickTarget.getBoundingClientRect();
-      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), col: col };
+      var fiber = table[fiberKey];
+      var current = fiber;
+
+      for (var i = 0; i < 50 && current; i++) {
+        if (current.memoizedProps && current.memoizedProps.sort) {
+          var s = current.memoizedProps.sort;
+          return { sortBy: s.sortBy, sortOrder: s.sortOrder };
+        }
+        current = current.return;
+      }
+      return { error: 'Sort state not found in fiber tree' };
     })()
   `);
 
-  if (coords?.error) throw new Error(coords.error);
-
-  // Step 2: Click header to open context menu, then click sort option
-  const c = await getClient();
-
-  // First close any existing menu by pressing Escape
-  await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
-  await new Promise(r => setTimeout(r, 300));
-
-  // Click the column header to open context menu
-  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
-  await new Promise(r => setTimeout(r, 50));
-  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
-  await new Promise(r => setTimeout(r, 800));
-
-  // Find and click the "Sort ascending" or "Sort descending" option in the dropdown
-  const sortLabel = order === 'asc' ? 'ascending' : 'descending';
-  await new Promise(r => setTimeout(r, 500));
-  const menuCoords = await evaluate(`
-    (function() {
-      var label = ${JSON.stringify(sortLabel)};
-      // Search broadly for any visible element containing the sort text
-      var target = null;
-      var allEls = document.querySelectorAll('div, span, button, [role="menuitem"], [role="option"]');
-      for (var i = 0; i < allEls.length; i++) {
-        var el = allEls[i];
-        var txt = (el.textContent || '').trim().toLowerCase();
-        var rect = el.getBoundingClientRect();
-        // Must contain "sort" and the direction, be visible, and reasonably sized
-        if (txt.includes('sort') && txt.includes(label) && rect.width > 30 && rect.height > 5 && rect.height < 60) {
-          // Prefer innermost matching element (fewest children)
-          if (!target || el.children.length < target.children.length) target = el;
-        }
-      }
-      if (!target) {
-        // Fallback: any element just containing the direction label
-        for (var i = 0; i < allEls.length; i++) {
-          var el = allEls[i];
-          var txt = (el.textContent || '').trim().toLowerCase();
-          var rect = el.getBoundingClientRect();
-          if (txt === 'sort ' + label && rect.width > 30 && rect.height > 5) { target = el; break; }
-        }
-      }
-      if (!target) return { error: 'Sort option not found. Menu may not have opened.' };
-      var r = target.getBoundingClientRect();
-      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-    })()
-  `);
-
-  if (menuCoords?.error) throw new Error(menuCoords.error);
-
-  // Click the sort option
-  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: menuCoords.x, y: menuCoords.y, button: 'left', clickCount: 1 });
-  await new Promise(r => setTimeout(r, 50));
-  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: menuCoords.x, y: menuCoords.y, button: 'left', clickCount: 1 });
-
-  await new Promise(r => setTimeout(r, 1500));
-
-  // Verify screener is still open — the menu click may have closed it
-  const stillOpen = await evaluate(FIND_TABLE);
-  if (stillOpen < 0) {
-    // Re-open it
-    await evaluate(`
-      (function() {
-        var btn = document.querySelector('[data-name="screener-dialog-button"]');
-        if (btn) btn.click();
-      })()
-    `);
-    await new Promise(r => setTimeout(r, 3000));
-  }
-
-  return { success: true, sorted: column, order: order };
+  if (result?.error) throw new Error(result.error);
+  return { success: true, ...result };
 }
 
 /**
- * Click a filter pill to open its popup, then read what filter options are available.
- * @param {string} filter_name - the filter pill text (e.g., "Sector", "Market cap", "P/E")
+ * Click a filter pill to open its popup and read filter options.
  */
 export async function filter({ filter_name }) {
-  // Find the filter pill coordinates
   const coords = await evaluate(`
     (function() {
       var name = ${JSON.stringify(filter_name)};
@@ -256,33 +329,22 @@ export async function filter({ filter_name }) {
   await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
   await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
 
-  if (result?.error) throw new Error(result.error);
-
-  // Wait for popup to appear
   await new Promise(r => setTimeout(r, 1000));
 
-  // Read the popup content
   const popup = await evaluate(`
     (function() {
-      // Look for recently opened popup/dialog
       var popups = document.querySelectorAll('[class*="popup"], [class*="Popup"], [class*="dialog"], [class*="Dialog"], [class*="dropdown"], [class*="Dropdown"], [role="dialog"], [role="listbox"]');
       if (popups.length === 0) return { options: [], note: 'No popup detected — filter may need manual interaction' };
-
       var lastPopup = popups[popups.length - 1];
       var options = [];
-
-      // Check for checkboxes/labels
       lastPopup.querySelectorAll('label, [role="option"], [class*="item"], [class*="checkbox"]').forEach(function(el) {
         var txt = (el.textContent || '').trim().slice(0, 60);
         if (txt) options.push(txt);
       });
-
-      // Check for input fields (range filters)
       var inputs = [];
       lastPopup.querySelectorAll('input').forEach(function(inp) {
         inputs.push({ type: inp.type, placeholder: inp.placeholder || '', value: inp.value || '' });
       });
-
       return { options: options.slice(0, 30), inputs: inputs, popup_class: lastPopup.className.slice(0, 80) };
     })()
   `);
@@ -308,7 +370,6 @@ export async function switchView(view) {
       return { switched: found.textContent.trim() };
     })()
   `);
-
   if (result?.error) throw new Error(result.error);
   await new Promise(r => setTimeout(r, 1000));
   return { success: true, ...result };
@@ -321,27 +382,21 @@ export async function getFilters() {
   const data = await evaluate(`
     (function() {
       var result = {};
-
-      // Filter pills
       var pills = [];
       document.querySelectorAll('[data-name*="screener-filter-pill"]').forEach(function(p) {
         pills.push(p.textContent.trim());
       });
       result.filters = pills;
-
-      // View tabs
       var tabs = [];
       var seen = {};
       document.querySelectorAll('[class*="screener"] button, [class*="Screener"] button').forEach(function(b) {
-        var txt = (b.textContent || '').trim().replace(/(.+)\\1/, '$1'); // dedupe doubled text
+        var txt = (b.textContent || '').trim().replace(/(.+)\\1/, '$1');
         if (txt && !seen[txt] && txt.length > 2 && txt.length < 30 && !pills.includes(txt)) {
           seen[txt] = true;
           tabs.push(txt);
         }
       });
       result.views = tabs;
-
-      // Table headers (current columns)
       var headers = [];
       var tables = document.querySelectorAll('table');
       for (var i = 0; i < tables.length; i++) {
@@ -354,11 +409,9 @@ export async function getFilters() {
         }
       }
       result.columns = headers;
-
       return result;
     })()
   `);
-
   return { success: true, ...data };
 }
 
