@@ -22,6 +22,13 @@ const FIND_TABLE = `
  * Open the screener panel via the bottom-bar button.
  */
 export async function open() {
+  // Check if screener is already open (has a visible table with >2 headers)
+  const alreadyOpen = await evaluate(FIND_TABLE);
+  if (alreadyOpen >= 0) {
+    return { success: true, action: 'already_open', screener_visible: true };
+  }
+
+  // Click the screener button to open it
   const clicked = await evaluate(`
     (function() {
       var btn = document.querySelector('[data-name="screener-dialog-button"]');
@@ -33,12 +40,18 @@ export async function open() {
   if (clicked === 'button_not_found') {
     throw new Error('Screener button not found. Is TradingView Desktop open with a chart?');
   }
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 3000));
 
   // Verify it opened
   const tableIdx = await evaluate(FIND_TABLE);
-  const isOpen = tableIdx >= 0;
-  return { success: true, action: 'opened', screener_visible: isOpen };
+  if (tableIdx < 0) {
+    // Maybe the click closed it instead — try one more click
+    await evaluate(`document.querySelector('[data-name="screener-dialog-button"]').click()`);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  const finalCheck = await evaluate(FIND_TABLE);
+  return { success: true, action: 'opened', screener_visible: finalCheck >= 0 };
 }
 
 /**
@@ -104,10 +117,10 @@ export async function read({ max_rows = 100, view } = {}) {
 export async function sort({ column, order = 'desc' }) {
   const clicks = order === 'asc' ? 2 : 1;
 
-  const result = await evaluate(`
+  // Step 1: Find the column header's bounding rect
+  const coords = await evaluate(`
     (function() {
       var col = ${JSON.stringify(column)};
-      var clicks = ${clicks};
       var tables = document.querySelectorAll('table');
       var table = null;
       for (var i = 0; i < tables.length; i++) {
@@ -123,7 +136,6 @@ export async function sort({ column, order = 'desc' }) {
         if (txt === col || txt.toLowerCase() === colLower) target = th;
       });
       if (!target) {
-        // Try partial match
         ths.forEach(function(th) {
           var txt = th.textContent.trim().replace(/\\s+/g, ' ').toLowerCase();
           if (txt.includes(colLower)) target = th;
@@ -135,18 +147,85 @@ export async function sort({ column, order = 'desc' }) {
         return { error: 'Column not found: ' + col + '. Available: ' + available.join(', ') };
       }
 
-      // Click the clickable child element within the th, or the th itself
-      var clickTarget = target.querySelector('div, span, button') || target;
-      for (var c = 0; c < clicks; c++) {
-        clickTarget.click();
-      }
-      return { sorted: col, order: clicks === 1 ? 'desc' : 'asc' };
+      var clickTarget = target.querySelector('div[class*="cellWrapper"]') || target;
+      var rect = clickTarget.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), col: col };
     })()
   `);
 
-  if (result?.error) throw new Error(result.error);
+  if (coords?.error) throw new Error(coords.error);
+
+  // Step 2: Click header to open context menu, then click sort option
+  const c = await getClient();
+
+  // First close any existing menu by pressing Escape
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await new Promise(r => setTimeout(r, 300));
+
+  // Click the column header to open context menu
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+  await new Promise(r => setTimeout(r, 50));
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+  await new Promise(r => setTimeout(r, 800));
+
+  // Find and click the "Sort ascending" or "Sort descending" option in the dropdown
+  const sortLabel = order === 'asc' ? 'ascending' : 'descending';
+  await new Promise(r => setTimeout(r, 500));
+  const menuCoords = await evaluate(`
+    (function() {
+      var label = ${JSON.stringify(sortLabel)};
+      // Search broadly for any visible element containing the sort text
+      var target = null;
+      var allEls = document.querySelectorAll('div, span, button, [role="menuitem"], [role="option"]');
+      for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        var txt = (el.textContent || '').trim().toLowerCase();
+        var rect = el.getBoundingClientRect();
+        // Must contain "sort" and the direction, be visible, and reasonably sized
+        if (txt.includes('sort') && txt.includes(label) && rect.width > 30 && rect.height > 5 && rect.height < 60) {
+          // Prefer innermost matching element (fewest children)
+          if (!target || el.children.length < target.children.length) target = el;
+        }
+      }
+      if (!target) {
+        // Fallback: any element just containing the direction label
+        for (var i = 0; i < allEls.length; i++) {
+          var el = allEls[i];
+          var txt = (el.textContent || '').trim().toLowerCase();
+          var rect = el.getBoundingClientRect();
+          if (txt === 'sort ' + label && rect.width > 30 && rect.height > 5) { target = el; break; }
+        }
+      }
+      if (!target) return { error: 'Sort option not found. Menu may not have opened.' };
+      var r = target.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()
+  `);
+
+  if (menuCoords?.error) throw new Error(menuCoords.error);
+
+  // Click the sort option
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: menuCoords.x, y: menuCoords.y, button: 'left', clickCount: 1 });
+  await new Promise(r => setTimeout(r, 50));
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: menuCoords.x, y: menuCoords.y, button: 'left', clickCount: 1 });
+
   await new Promise(r => setTimeout(r, 1500));
-  return { success: true, ...result };
+
+  // Verify screener is still open — the menu click may have closed it
+  const stillOpen = await evaluate(FIND_TABLE);
+  if (stillOpen < 0) {
+    // Re-open it
+    await evaluate(`
+      (function() {
+        var btn = document.querySelector('[data-name="screener-dialog-button"]');
+        if (btn) btn.click();
+      })()
+    `);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  return { success: true, sorted: column, order: order };
 }
 
 /**
@@ -154,7 +233,8 @@ export async function sort({ column, order = 'desc' }) {
  * @param {string} filter_name - the filter pill text (e.g., "Sector", "Market cap", "P/E")
  */
 export async function filter({ filter_name }) {
-  const result = await evaluate(`
+  // Find the filter pill coordinates
+  const coords = await evaluate(`
     (function() {
       var name = ${JSON.stringify(filter_name)};
       var pills = document.querySelectorAll('[data-name*="screener-filter-pill"]');
@@ -163,10 +243,18 @@ export async function filter({ filter_name }) {
         if (p.textContent.trim().toLowerCase().includes(name.toLowerCase())) target = p;
       });
       if (!target) return { error: 'Filter pill not found: ' + name };
-      target.click();
-      return { clicked: target.textContent.trim() };
+      var rect = target.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), clicked: target.textContent.trim() };
     })()
   `);
+
+  if (coords?.error) throw new Error(coords.error);
+  const result = coords;
+
+  // CDP click for React compatibility
+  const c = await getClient();
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x: coords.x, y: coords.y, button: 'left', clickCount: 1 });
 
   if (result?.error) throw new Error(result.error);
 
