@@ -1,0 +1,586 @@
+{
+  "success": true,
+  "shape_count": 11,
+  "state": [
+    {
+      "id": "673BYF",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 72174,
+          "time": 1769990400
+        },
+        {
+          "price": 65977.61819632543,
+          "time": 1770595200
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(156, 156, 156, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "989OJl",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 70576.87565451293,
+          "time": 1769990400
+        },
+        {
+          "price": 64576.16857455146,
+          "time": 1770595200
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(156, 156, 156, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "afjn1D",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 71306.2528802042,
+          "time": 1770595200
+        },
+        {
+          "price": 62298.22820744256,
+          "time": 1771804800
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(128, 128, 128, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "i8KgTW",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 70452.27599226855,
+          "time": 1770595200
+        },
+        {
+          "price": 64264.481785435164,
+          "time": 1771200000
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(156, 156, 156, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "BHYQyQ",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 97939,
+          "time": 1768176000
+        },
+        {
+          "price": 51936.52260540359,
+          "time": 1776038400
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(255, 255, 255, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "lGmiIM",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 64515.67622026477,
+          "time": 1772409600
+        },
+        {
+          "price": 59884.57290172882,
+          "time": 1769990400
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(156, 156, 156, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "Tgie2k",
+      "name": "rotated_rectangle",
+      "points": [
+        {
+          "price": 67701,
+          "time": 1771804800
+        },
+        {
+          "price": 63894.882949538616,
+          "time": 1771804800
+        },
+        {
+          "price": 63822.13168176906,
+          "time": 1771804800
+        }
+      ],
+      "properties": {
+        "color": "rgba(99, 99, 99, 0.679)",
+        "fillBackground": true,
+        "backgroundColor": "rgba(128, 128, 128, 0.3733)",
+        "transparency": 50,
+        "linewidth": 3,
+        "visible": true,
+        "frozen": false
+      }
+    },
+    {
+      "id": "BStDUT",
+      "name": "rotated_rectangle",
+      "points": [
+        {
+          "price": 70030.01523586632,
+          "time": 1771804800
+        },
+        {
+          "price": 64168.10038625102,
+          "time": 1772409600
+        },
+        {
+          "price": 70148.85866456445,
+          "time": 1771804800
+        }
+      ],
+      "properties": {
+        "color": "rgba(99, 99, 99, 0.679)",
+        "fillBackground": true,
+        "backgroundColor": "rgba(128, 128, 128, 0.3733)",
+        "transparency": 50,
+        "linewidth": 3,
+        "visible": true,
+        "frozen": false
+      }
+    },
+    {
+      "id": "RoMzYO",
+      "name": "trend_line",
+      "points": [
+        {
+          "price": 68070,
+          "time": 1771200000
+        },
+        {
+          "price": 62298.22820744256,
+          "time": 1771804800
+        }
+      ],
+      "properties": {
+        "linecolor": "rgba(156, 156, 156, 1)",
+        "textcolor": "rgba( 21, 119, 96, 1)",
+        "linewidth": 4,
+        "linestyle": 0,
+        "extendLeft": false,
+        "extendRight": false,
+        "leftEnd": 0,
+        "rightEnd": 0,
+        "horzLabelsAlign": "center",
+        "vertLabelsAlign": "bottom",
+        "fontsize": 12,
+        "bold": false,
+        "italic": false,
+        "alwaysShowStats": false,
+        "showMiddlePoint": false,
+        "showPriceLabels": false,
+        "showPriceRange": false,
+        "showPercentPriceRange": false,
+        "showPipsPriceRange": false,
+        "showBarsRange": false,
+        "showDateTimeRange": false,
+        "showDistance": false,
+        "showAngle": false,
+        "statsPosition": 2,
+        "text": "",
+        "frozen": false,
+        "visible": true
+      }
+    },
+    {
+      "id": "z9Wxxj",
+      "name": "fib_retracement",
+      "points": [
+        {
+          "price": 15479,
+          "time": 1668988800
+        },
+        {
+          "price": 126272,
+          "time": 1759708800
+        }
+      ],
+      "properties": {
+        "showCoeffs": true,
+        "showPrices": true,
+        "fillBackground": true,
+        "transparency": 97.34030330882354,
+        "extendLines": false,
+        "extendLinesLeft": false,
+        "horzLabelsAlign": "right",
+        "vertLabelsAlign": "middle",
+        "showText": true,
+        "horzTextAlign": "center",
+        "vertTextAlign": "middle",
+        "reverse": false,
+        "coeffsAsPercents": false,
+        "fibLevelsBasedOnLogScale": false,
+        "labelFontSize": 8,
+        "trendline": {
+          "visible": false,
+          "color": "#808080",
+          "linewidth": 2,
+          "linestyle": 2
+        },
+        "levelsStyle": {
+          "linewidth": 2,
+          "linestyle": 0
+        },
+        "level1": [
+          0,
+          "#808080",
+          true,
+          ""
+        ],
+        "level2": [
+          0.236,
+          "#F23645",
+          false,
+          ""
+        ],
+        "level3": [
+          0.382,
+          "rgba(255, 152, 0, 0.3312)",
+          true,
+          ""
+        ],
+        "level4": [
+          0.5,
+          "#4caf50",
+          true,
+          ""
+        ],
+        "level5": [
+          0.618,
+          "#089981",
+          true,
+          ""
+        ],
+        "level6": [
+          0.786,
+          "#00bcd4",
+          true,
+          ""
+        ],
+        "level7": [
+          1,
+          "#808080",
+          true,
+          ""
+        ],
+        "level8": [
+          1.618,
+          "#2962FF",
+          false,
+          ""
+        ],
+        "level9": [
+          2.618,
+          "#F23645",
+          false,
+          ""
+        ],
+        "level10": [
+          3.618,
+          "#9c27b0",
+          false,
+          ""
+        ],
+        "level11": [
+          4.236,
+          "#e91e63",
+          false,
+          ""
+        ],
+        "level12": [
+          1.272,
+          "#FF9800",
+          false,
+          ""
+        ],
+        "level13": [
+          1.414,
+          "#F23645",
+          false,
+          ""
+        ],
+        "level16": [
+          2,
+          "#089981",
+          false,
+          ""
+        ],
+        "level14": [
+          2.272,
+          "#FF9800",
+          false,
+          ""
+        ],
+        "level15": [
+          2.414,
+          "#4caf50",
+          false,
+          ""
+        ],
+        "level17": [
+          3,
+          "#00bcd4",
+          false,
+          ""
+        ],
+        "level18": [
+          3.272,
+          "#808080",
+          false,
+          ""
+        ],
+        "level19": [
+          3.414,
+          "#2962FF",
+          false,
+          ""
+        ],
+        "level20": [
+          4,
+          "#F23645",
+          false,
+          ""
+        ],
+        "level21": [
+          4.272,
+          "#9c27b0",
+          false,
+          ""
+        ],
+        "level22": [
+          4.414,
+          "#e91e63",
+          false,
+          ""
+        ],
+        "level23": [
+          4.618,
+          "#FF9800",
+          false,
+          ""
+        ],
+        "level24": [
+          4.764,
+          "#089981",
+          false,
+          ""
+        ],
+        "visible": true,
+        "frozen": false
+      }
+    },
+    {
+      "id": "ZB3HdN",
+      "name": "elliott_impulse_wave",
+      "points": [
+        {
+          "price": 15479,
+          "time": 1668988800
+        },
+        {
+          "price": 73794,
+          "time": 1710115200
+        },
+        {
+          "price": 49577,
+          "time": 1722816000
+        },
+        {
+          "price": 126272,
+          "time": 1759708800
+        },
+        {
+          "price": 59930,
+          "time": 1769990400
+        },
+        {
+          "price": 160000,
+          "time": 1785715200
+        }
+      ],
+      "properties": {
+        "degree": 12,
+        "showWave": true,
+        "color": "rgba(156, 156, 156, 1)",
+        "linewidth": 2,
+        "visible": true,
+        "frozen": false
+      }
+    }
+  ]
+}

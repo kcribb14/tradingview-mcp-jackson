@@ -71,6 +71,12 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
   const targets = await resp.json();
+  // Allow targeting a specific tab via env var (e.g. TV_TARGET=C955E48B...)
+  const envTarget = process.env.TV_TARGET;
+  if (envTarget) {
+    const match = targets.find(t => t.id === envTarget || (t.url && t.url.includes(envTarget)));
+    if (match) return match;
+  }
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
