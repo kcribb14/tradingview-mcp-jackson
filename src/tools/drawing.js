@@ -54,4 +54,21 @@ export function registerDrawingTools(server) {
     try { return jsonResult(await core.getProperties({ entity_id })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('draw_save_state', 'Save all drawings on the chart (points, properties, shape types) as a JSON state object. Use draw_load_state to restore later.', {}, async () => {
+    try { return jsonResult(await core.saveDrawingState()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('draw_load_state', 'Restore drawings from a previously saved state object. Recreates all shapes with their original points and properties.', {
+    state: z.array(z.object({
+      name: z.string(),
+      points: z.array(z.object({ time: z.coerce.number(), price: z.coerce.number() })),
+      properties: z.record(z.any()).optional(),
+    })).describe('Array of drawing objects from draw_save_state'),
+    clear_existing: z.boolean().optional().describe('Remove all existing drawings before loading (default false)'),
+  }, async ({ state, clear_existing }) => {
+    try { return jsonResult(await core.loadDrawingState({ state, clear_existing })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

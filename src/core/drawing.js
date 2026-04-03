@@ -211,3 +211,78 @@ export async function clearAll() {
   await evaluate(`${apiPath}.removeAllShapes()`);
   return { success: true, action: 'all_shapes_removed' };
 }
+
+export async function saveDrawingState() {
+  const apiPath = await getChartApi();
+  const result = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var shapes = api.getAllShapes();
+      var state = [];
+      for (var i = 0; i < shapes.length; i++) {
+        var s = shapes[i];
+        var entry = { id: s.id, name: s.name };
+        try {
+          var shape = api.getShapeById(s.id);
+          if (shape) {
+            try { entry.points = shape.getPoints(); } catch(e) {}
+            try { entry.properties = shape.getProperties(); } catch(e) {}
+          }
+        } catch(e) {}
+        state.push(entry);
+      }
+      return state;
+    })()
+  `);
+  return { success: true, shape_count: result?.length || 0, state: result || [] };
+}
+
+export async function loadDrawingState({ state, clear_existing }) {
+  const apiPath = await getChartApi();
+
+  if (clear_existing) {
+    await evaluate(`${apiPath}.removeAllShapes()`);
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  let created = 0;
+  let failed = 0;
+  const errors = [];
+
+  for (const entry of state) {
+    try {
+      const pointsStr = (entry.points || []).map(p => `{ time: ${p.time}, price: ${p.price} }`).join(', ');
+      const overridesStr = JSON.stringify(entry.properties || {});
+      const textStr = entry.properties?.text ? JSON.stringify(entry.properties.text) : '""';
+
+      if (!entry.points || entry.points.length === 0) {
+        failed++;
+        errors.push(`${entry.name}: no points`);
+        continue;
+      }
+
+      if (entry.points.length === 1) {
+        await evaluate(`
+          ${apiPath}.createShape(
+            { time: ${entry.points[0].time}, price: ${entry.points[0].price} },
+            { shape: '${entry.name}', overrides: ${overridesStr}, text: ${textStr} }
+          )
+        `);
+      } else {
+        await evaluate(`
+          ${apiPath}.createMultipointShape(
+            [${pointsStr}],
+            { shape: '${entry.name}', overrides: ${overridesStr}, text: ${textStr} }
+          )
+        `);
+      }
+      created++;
+    } catch (e) {
+      failed++;
+      errors.push(`${entry.name}: ${e.message}`);
+    }
+  }
+
+  await new Promise(r => setTimeout(r, 300));
+  return { success: true, created, failed, errors: errors.length > 0 ? errors : undefined };
+}
