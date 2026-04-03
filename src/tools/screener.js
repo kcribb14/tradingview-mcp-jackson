@@ -41,6 +41,32 @@ export function registerScreenerTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('screener_read_filters', 'Read the current state of all screener filters from Redux (which are active, their column, operation, and value).', {}, async () => {
+    try { return jsonResult(await core.readFilters()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('screener_set_filter', 'Set a filter on the screener via Redux. Programmatic — no DOM clicks needed.', {
+    column: z.string().describe('Column to filter: "Market cap", "P/E", "Price", "Change %", "Volume", "EPS growth", "Div yield %", "Beta", "ROE", "PEG", "Revenue growth", "Analyst Rating", "Sector"'),
+    operator: z.string().describe('Comparison: ">", ">=", "<", "<=", "=", "!=", "between"'),
+    value: z.union([z.number(), z.string(), z.array(z.number())]).describe('Filter value. For "between", pass [low, high] array. For numeric filters, use raw numbers (e.g., 1000000000000 for 1T). For text, use string.'),
+  }, async ({ column, operator, value }) => {
+    try { return jsonResult(await core.setFilter({ column, operator, value })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('screener_reset_filter', 'Reset a specific screener filter to its default (unset) state.', {
+    column: z.string().describe('Column to reset: "Market cap", "P/E", "Price", etc.'),
+  }, async ({ column }) => {
+    try { return jsonResult(await core.resetFilter({ column })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('screener_reset_all_filters', 'Reset all screener filters to defaults.', {}, async () => {
+    try { return jsonResult(await core.resetAllFilters()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('screener_export', 'Export all visible screener data as structured JSON (up to 500 rows).', {}, async () => {
     try { return jsonResult(await core.exportData()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

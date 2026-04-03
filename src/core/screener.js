@@ -303,8 +303,239 @@ export async function getSort() {
   return { success: true, ...result };
 }
 
+// ─── Filter operations via Redux store ────────────────────────────────────
+
+/**
+ * Helper: JS expression that finds the Redux store from the screener fiber tree.
+ * Returns expression fragment for use inside evalInScreener.
+ */
+const FIND_STORE_EXPR = `
+  var tables = document.querySelectorAll('table');
+  var table = null;
+  for (var i = 0; i < tables.length; i++) {
+    if (tables[i].querySelectorAll('th').length > 2) { table = tables[i]; break; }
+  }
+  if (!table) return { error: 'Screener table not found' };
+  var fiberKey = Object.keys(table).find(function(k) { return k.startsWith('__reactFiber'); });
+  if (!fiberKey) return { error: 'React fiber not found' };
+  var current = table[fiberKey];
+  var store = null;
+  for (var i = 0; i < 70 && current; i++) {
+    if (current.memoizedProps && current.memoizedProps.store && typeof current.memoizedProps.store.getState === 'function') {
+      store = current.memoizedProps.store;
+      break;
+    }
+    current = current.return;
+  }
+  if (!store) return { error: 'Redux store not found in fiber tree' };
+`;
+
+/**
+ * Helper: JS expression that finds editFilter from a filter pill's fiber tree.
+ * The filter pill buttons have data-name="screener-filter-pill-{id}".
+ * Walk 9 levels up from the pill to find the component with editFilter.
+ */
+const FIND_EDIT_FILTER_EXPR = `
+  // Find any filter pill button
+  var pill = document.querySelector('[data-name^="screener-filter-pill-"]');
+  if (!pill) return { error: 'No filter pill found. Is the screener open?' };
+  var fiberKey = Object.keys(pill).find(function(k) { return k.startsWith('__reactFiber'); });
+  if (!fiberKey) return { error: 'No fiber on filter pill' };
+  var current = pill[fiberKey];
+  var editFilter = null;
+  var addFilter = null;
+  var removeFilter = null;
+  var resetFilter = null;
+  // Walk up to find the component with filter action hooks
+  for (var i = 0; i < 20 && current; i++) {
+    if (current.memoizedState) {
+      var s = current.memoizedState;
+      for (var j = 0; j < 30 && s; j++) {
+        if (s.memoizedState && typeof s.memoizedState === 'function') {
+          // Heuristic: hooks 14-17 are addFilter, editFilter, removeFilter, resetFilter
+          // We detect them by looking for dispatch patterns
+        }
+        s = s.next;
+      }
+    }
+    // Check for props with filter functions
+    if (current.memoizedProps) {
+      var p = current.memoizedProps;
+      if (typeof p.editFilter === 'function') editFilter = p.editFilter;
+      if (typeof p.addFilter === 'function') addFilter = p.addFilter;
+      if (typeof p.removeFilter === 'function') removeFilter = p.removeFilter;
+      if (typeof p.resetFilter === 'function') resetFilter = p.resetFilter;
+    }
+    current = current.return;
+  }
+`;
+
+/**
+ * Operation type mapping for user-friendly syntax.
+ */
+const OP_MAP = {
+  '>': 'above', '>=': 'aboveOrEqual', 'above': 'above', 'aboveOrEqual': 'aboveOrEqual',
+  '<': 'below', '<=': 'belowOrEqual', 'below': 'below', 'belowOrEqual': 'belowOrEqual',
+  '=': 'equal', '==': 'equal', 'equal': 'equal',
+  '!=': 'notEqual', 'notEqual': 'notEqual',
+  'between': 'between',
+};
+
+/**
+ * Read current filter state from Redux store.
+ */
+export async function readFilters() {
+  const result = await evalInScreener(`
+    (function() {
+      ${FIND_STORE_EXPR}
+      var state = store.getState();
+      var filters = state.screen ? state.screen.filters : null;
+      if (!filters) return { error: 'No screen.filters in Redux state' };
+
+      var summary = filters.map(function(f) {
+        var col = f.left && f.left.column ? f.left.column.id : 'unknown';
+        var opType = f.operation ? f.operation.type : null;
+        var val = f.right ? (f.right.value !== undefined ? f.right.value : f.right.values || null) : null;
+        var active = val !== null && val !== undefined;
+        return { id: f.id, column: col, type: f.type, operation: opType, value: val, active: active };
+      });
+
+      return { filter_count: filters.length, filters: summary };
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+  return { success: true, ...result };
+}
+
+/**
+ * Set a filter on a specific column via Redux editFilter action.
+ *
+ * @param {string} column - Column name (e.g., "Market cap", "P/E", "Change %")
+ * @param {string} operator - Comparison operator: ">", ">=", "<", "<=", "=", "!=", "between"
+ * @param {number|string|Array} value - Value to filter by. For "between", pass [low, high].
+ */
+export async function setFilter({ column, operator, value }) {
+  const colLower = column.toLowerCase().replace(/\s+/g, ' ').replace(/%/g, '').trim();
+  const columnId = COLUMN_MAP[colLower] || column;
+  const opType = OP_MAP[operator] || operator;
+
+  // Build the right-side value
+  let rightExpr;
+  if (opType === 'between' && Array.isArray(value)) {
+    rightExpr = `{ left: ${value[0]}, right: ${value[1]} }`;
+  } else {
+    rightExpr = `{ value: ${JSON.stringify(value)} }`;
+  }
+
+  const result = await evalInScreener(`
+    (function() {
+      ${FIND_STORE_EXPR}
+      var screenState = store.getState().screen;
+      var filters = screenState.filters;
+      var columnId = ${JSON.stringify(columnId)};
+      var opType = ${JSON.stringify(opType)};
+
+      // Find the existing filter for this column
+      var target = null;
+      for (var i = 0; i < filters.length; i++) {
+        if (filters[i].left && filters[i].left.column && filters[i].left.column.id === columnId) {
+          target = filters[i];
+          break;
+        }
+      }
+
+      if (!target) {
+        return { error: 'No filter found for column: ' + columnId + '. Available: ' + filters.map(function(f) { return f.left && f.left.column ? f.left.column.id : '?'; }).join(', ') };
+      }
+
+      // Build modified filter
+      var modified = JSON.parse(JSON.stringify(target));
+      modified.operation = { type: opType };
+      modified.right = ${rightExpr};
+
+      // Dispatch via Redux store (screen/editFilter is the Redux Toolkit action type)
+      store.dispatch({ type: 'screen/editFilter', payload: { filter: modified } });
+
+      return {
+        applied: true,
+        column: columnId,
+        operation: opType,
+        value: ${JSON.stringify(value)},
+        filter_id: target.id
+      };
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+  await new Promise(r => setTimeout(r, 2000));
+  return { success: true, ...result };
+}
+
+/**
+ * Reset a specific filter (clear its value).
+ */
+export async function resetFilter({ column }) {
+  const colLower = column.toLowerCase().replace(/\s+/g, ' ').replace(/%/g, '').trim();
+  const columnId = COLUMN_MAP[colLower] || column;
+
+  const result = await evalInScreener(`
+    (function() {
+      ${FIND_STORE_EXPR}
+      var filters = store.getState().screen.filters;
+      var target = null;
+      for (var i = 0; i < filters.length; i++) {
+        if (filters[i].left && filters[i].left.column && filters[i].left.column.id === ${JSON.stringify(columnId)}) {
+          target = filters[i];
+          break;
+        }
+      }
+      if (!target) return { error: 'Filter not found for column: ' + ${JSON.stringify(columnId)} };
+
+      var reset = JSON.parse(JSON.stringify(target));
+      reset.right = { value: null };
+      reset.operation = { type: null };
+
+      store.dispatch({ type: 'screen/editFilter', payload: { filter: reset } });
+      return { reset: true, column: ${JSON.stringify(columnId)}, filter_id: target.id };
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+  await new Promise(r => setTimeout(r, 1500));
+  return { success: true, ...result };
+}
+
+/**
+ * Reset all filters to defaults.
+ */
+export async function resetAllFilters() {
+  const result = await evalInScreener(`
+    (function() {
+      ${FIND_STORE_EXPR}
+      var filters = store.getState().screen.filters;
+      var count = 0;
+      filters.forEach(function(f) {
+        if (f.right && (f.right.value !== null || f.right.values)) {
+          var reset = JSON.parse(JSON.stringify(f));
+          reset.right = { value: null };
+          reset.operation = { type: null };
+          store.dispatch({ type: 'RESET_FILTER', payload: { filter: reset } });
+          count++;
+        }
+      });
+      return { reset_count: count };
+    })()
+  `);
+
+  if (result?.error) throw new Error(result.error);
+  await new Promise(r => setTimeout(r, 2000));
+  return { success: true, ...result };
+}
+
 /**
  * Click a filter pill to open its popup and read filter options.
+ * (Legacy DOM-based approach — still useful for visual interaction.)
  */
 export async function filter({ filter_name }) {
   const coords = await evaluate(`

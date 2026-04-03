@@ -41,6 +41,37 @@ register('screener', {
       description: 'List available filter pills and view tabs',
       handler: () => core.getFilters(),
     }],
+    ['read-filters', {
+      description: 'Read current filter state from Redux',
+      handler: () => core.readFilters(),
+    }],
+    ['set-filter', {
+      description: 'Set a filter (e.g., tv screener set-filter "Market cap" ">=" 1000000000000)',
+      handler: (opts, positionals) => {
+        if (positionals.length < 3) throw new Error('Usage: tv screener set-filter "column" "operator" value\nExample: tv screener set-filter "P/E" "<" 15');
+        const column = positionals[0];
+        const operator = positionals[1];
+        let value = positionals[2];
+        // Try to parse as number
+        if (!isNaN(value)) value = Number(value);
+        // Try to parse as array
+        if (typeof value === 'string' && value.startsWith('[')) {
+          try { value = JSON.parse(value); } catch {}
+        }
+        return core.setFilter({ column, operator, value });
+      },
+    }],
+    ['reset-filter', {
+      description: 'Reset a specific filter',
+      handler: (opts, positionals) => {
+        if (!positionals[0]) throw new Error('Column name required. Usage: tv screener reset-filter "Market cap"');
+        return core.resetFilter({ column: positionals.join(' ') });
+      },
+    }],
+    ['reset-all', {
+      description: 'Reset all filters to defaults',
+      handler: () => core.resetAllFilters(),
+    }],
     ['export', {
       description: 'Export all screener data as JSON',
       handler: () => core.exportData(),
