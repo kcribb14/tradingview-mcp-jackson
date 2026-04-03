@@ -1,0 +1,72 @@
+{
+  "name": "2019 Fractal — We Topped on Apathy, Not Euphoria",
+  "symbol": "BITSTAMP:BTCUSD",
+  "timeframe": "1D",
+  "created": "2026-04-03",
+  "description": "BTC 2019 fractal comparison: 5-wave corrective structure from ATH ($126K) to swing low ($60K), with Fib retracement, Elliott wave, pitchfork recovery channel, XABCD harmonic, parallel channel, and Gann analysis.",
+  "key_levels": {
+    "ath": 126272,
+    "swing_low": 59930,
+    "invalidation": 60000,
+    "fib_0618": 100929,
+    "fib_05": 93101,
+    "fib_0786": 112075
+  },
+  "shapes": [
+    {
+      "name": "fib_retracement",
+      "points": [{"price": 126272, "time": 1759708800}, {"price": 59930, "time": 1770336000}],
+      "properties": {"showCoeffs": true, "showPrices": true, "fillBackground": true, "transparency": 75, "extendLines": false, "showText": true, "reverse": false, "labelFontSize": 8, "trendline": {"visible": false, "color": "#808080", "linewidth": 2, "linestyle": 2}, "levelsStyle": {"linewidth": 2, "linestyle": 0}, "level1": [0, "#808080", true, ""], "level2": [0.236, "#F23645", false, ""], "level3": [0.382, "rgba(255, 152, 0, 0.3312)", true, ""], "level4": [0.5, "#4caf50", true, ""], "level5": [0.618, "#089981", true, ""], "level6": [0.786, "#00bcd4", true, ""], "level7": [1, "#808080", true, ""]}
+    },
+    {
+      "name": "elliott_impulse_wave",
+      "points": [{"price": 126272, "time": 1759708800}, {"price": 98898, "time": 1762214400}, {"price": 94172, "time": 1764720000}, {"price": 80537, "time": 1763683200}, {"price": 97939, "time": 1768348800}, {"price": 59930, "time": 1770336000}],
+      "properties": {"degree": 12, "showWave": true, "color": "#FFD700", "linewidth": 2}
+    },
+    {
+      "name": "pitchfork",
+      "points": [{"price": 59930, "time": 1770336000}, {"price": 76013, "time": 1773705600}, {"price": 62525, "time": 1771891200}],
+      "properties": {"fillBackground": true, "transparency": 80, "style": 0, "extendLines": false}
+    },
+    {
+      "name": "rectangle",
+      "points": [{"price": 94194, "time": 1764979200}, {"price": 63189, "time": 1776988800}],
+      "properties": {"color": "#2196F3", "fillBackground": true, "backgroundColor": "#2196F3", "linewidth": 1, "transparency": 88}
+    },
+    {
+      "name": "horizontal_line",
+      "points": [{"price": 60000, "time": 1770336000}],
+      "properties": {"linecolor": "#FF0000", "linewidth": 3, "linestyle": 0, "showPrice": true}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 132000, "time": 1765929600}],
+      "properties": {"color": "#FFFFFF", "fontsize": 16, "bold": true, "text": "We Topped on Apathy, Not Euphoria — 2019 Fractal"}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 57000, "time": 1771459200}],
+      "properties": {"color": "#FF0000", "fontsize": 12, "bold": true, "text": "INVALIDATION — Weekly close below $60K opens bear scenario"}
+    },
+    {
+      "name": "callout",
+      "points": [{"price": 105000, "time": 1776988800}],
+      "properties": {"color": "#00E676", "backgroundColor": "#1a1a2e", "fontsize": 12, "text": "Recovery targets:\n$94K → $101.5K → $111.9K"}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 130000, "time": 1764979200}],
+      "properties": {"color": "#AAAAAA", "fontsize": 12, "text": "~175 day correction"}
+    },
+    {
+      "name": "parallel_channel",
+      "points": [{"price": 74075, "time": 1772582400}, {"price": 72026, "time": 1774396800}, {"price": 62647, "time": 1772582400}],
+      "properties": {"fillBackground": true, "transparency": 85, "backgroundColor": "#FF9800"}
+    },
+    {
+      "name": "xabcd_pattern",
+      "points": [{"price": 62525, "time": 1771891200}, {"price": 74075, "time": 1772582400}, {"price": 65623, "time": 1772928000}, {"price": 76013, "time": 1773705600}, {"price": 64955, "time": 1774742400}],
+      "properties": {"color": "#E040FB", "linewidth": 2, "transparency": 80, "fillBackground": true}
+    }
+  ]
+}

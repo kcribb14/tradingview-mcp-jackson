@@ -1,0 +1,69 @@
+{
+  "name": "ETH 2019 Fractal — Does It Rhyme?",
+  "symbol": "COINBASE:ETHUSD",
+  "timeframe": "1D",
+  "created": "2026-04-03",
+  "description": "ETH 2019 fractal comparison adapted from BTC template. 5-wave corrective structure from ATH ($4,759) to swing low ($1,743). Correction: -63.4% (deeper than BTC -52.5%), same 175-day duration.",
+  "key_levels": {
+    "ath": 4759.16,
+    "swing_low": 1742.79,
+    "invalidation": 1700,
+    "fib_0618": 3606.91,
+    "fib_05": 3250.98,
+    "fib_0786": 4113.66
+  },
+  "shapes": [
+    {
+      "name": "fib_retracement",
+      "points": [{"price": 4759.16, "time": 1759795200}, {"price": 1742.79, "time": 1770336000}],
+      "properties": {"transparency": 75, "showCoeffs": true, "showPrices": true, "fillBackground": true}
+    },
+    {
+      "name": "elliott_impulse_wave",
+      "points": [
+        {"price": 4759.16, "time": 1759795200},
+        {"price": 3055, "time": 1762214400},
+        {"price": 4254.23, "time": 1761523200},
+        {"price": 2620, "time": 1763683200},
+        {"price": 3477.44, "time": 1765324800},
+        {"price": 1742.79, "time": 1770336000}
+      ],
+      "properties": {"color": "#FFD700", "linewidth": 2, "degree": 12, "showWave": true}
+    },
+    {
+      "name": "pitchfork",
+      "points": [{"price": 1742.79, "time": 1770336000}, {"price": 2460, "time": 1773619200}, {"price": 1783.57, "time": 1771891200}],
+      "properties": {"fillBackground": true, "transparency": 80}
+    },
+    {
+      "name": "rectangle",
+      "points": [{"price": 3250.98, "time": 1765000000}, {"price": 1742.79, "time": 1777000000}],
+      "properties": {"color": "#2196F3", "fillBackground": true, "backgroundColor": "#2196F3", "transparency": 88}
+    },
+    {
+      "name": "horizontal_line",
+      "points": [{"price": 1700, "time": 1770336000}],
+      "properties": {"linecolor": "#FF0000", "linewidth": 3}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 5000, "time": 1766000000}],
+      "properties": {"color": "#FFFFFF", "fontsize": 16, "bold": true, "text": "ETH 2019 Fractal — Does It Rhyme?"}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 1550, "time": 1771500000}],
+      "properties": {"color": "#FF0000", "fontsize": 12, "bold": true, "text": "INVALIDATION — Weekly close below $1,700 opens bear scenario"}
+    },
+    {
+      "name": "callout",
+      "points": [{"price": 3800, "time": 1777000000}],
+      "properties": {"color": "#00E676", "backgroundColor": "#1a1a2e", "fontsize": 12, "text": "Recovery targets:\n$3,251 (0.5) → $3,606 (0.618) → $4,113 (0.786)"}
+    },
+    {
+      "name": "text",
+      "points": [{"price": 4900, "time": 1765000000}],
+      "properties": {"color": "#AAAAAA", "fontsize": 12, "text": "~175 day correction | -63.4% (deeper than BTC -52.5%)"}
+    }
+  ]
+}
