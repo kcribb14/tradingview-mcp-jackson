@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { loadCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
+import { addToken, discoverTokens, loadDexTokens } from '../core/dex_universe.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,6 +73,20 @@ app.get('/api/history', (req, res) => {
     }).filter(Boolean);
     res.json(snapshots);
   } catch { res.json([]); }
+});
+
+app.use(express.json());
+
+app.post('/api/add-token', async (req, res) => {
+  try {
+    const result = await addToken(req.body.url || req.body.address || '');
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/discover', async (req, res) => {
+  try { res.json(await discoverTokens()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
@@ -156,6 +171,37 @@ function buildData(tf, categoryFilter) {
   })).sort((a, b) => a.avg - b.avg);
 
   const avgFG = rows.length > 0 ? Math.round(rows.reduce((s, r) => s + r.fg, 0) / rows.length * 100) / 100 : 0;
+
+  // Add DEX tokens
+  const dexTokens = loadDexTokens();
+  const seenSymbols = new Set(rows.map(r => r.symbol));
+  for (const token of dexTokens) {
+    if (seenSymbols.has(token.symbol)) continue;
+    seenSymbols.add(token.symbol);
+
+    const catByMcap = token.mcap > 50e9 ? 'Crypto Mega' : token.mcap > 1e9 ? 'Crypto Large' :
+      token.mcap > 100e6 ? 'Crypto Mid' : token.mcap > 10e6 ? 'Crypto Small' :
+      token.mcap > 1e6 ? 'Crypto Micro' : 'Crypto Nano';
+    const catLabel = token.source === 'dexscreener' || token.source === 'boosted' || token.source === 'search'
+      ? 'DEX ' + (token.chain || '').charAt(0).toUpperCase() + (token.chain || '').slice(1)
+      : catByMcap;
+
+    if (categoryFilter && catLabel !== categoryFilter) continue;
+
+    let zn;
+    const fg = token.fg ?? 0;
+    if (fg >= 73) zn = 'Euphoria'; else if (fg >= 41) zn = 'Thrill'; else if (fg >= 10) zn = 'Excitement';
+    else if (fg >= 5) zn = 'Optimism'; else if (fg >= -5) zn = 'Balanced'; else if (fg >= -10) zn = 'Anxiety';
+    else if (fg >= -25) zn = 'Fear'; else if (fg >= -41) zn = 'Panic'; else zn = 'Despondency';
+
+    rows.push({
+      symbol: token.symbol, fg, zone: zn, category: catLabel, cls: 'DEX',
+      tier: 3, swing: '', rsi: null, price: token.price, mcap: token.mcap || 1e6,
+      fg_15m: null, fg_1H: null, fg_4H: null, fg_D: fg, fg_W: null,
+    });
+  }
+
+  rows.sort((a, b) => a.fg - b.fg);
 
   // Count available TFs
   const tfCounts = { '15m': 0, '1H': 0, '4H': 0, 'Daily': rows.length, 'Weekly': 0 };

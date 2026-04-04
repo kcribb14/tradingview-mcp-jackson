@@ -110,7 +110,12 @@ td{padding:6px 12px;white-space:nowrap}
 
 <div class="header">
   <div><h1>F&G <span>Scanner</span></h1><div class="header-meta" id="meta">Loading...</div></div>
-  <div><button class="btn btn-refresh" onclick="refresh()">⟳ Refresh</button></div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input type="text" id="addTokenInput" placeholder="Paste DexScreener URL or contract address..." style="background:#1e2329;border:1px solid #2b2f36;color:#eaecef;padding:6px 12px;border-radius:4px;font-size:12px;width:320px">
+    <button class="btn" onclick="addToken()" style="background:#f0b90b;border-color:#f0b90b;color:#181a20;font-weight:600;font-size:12px">+ Add Token</button>
+    <button class="btn" onclick="discoverDex()" style="font-size:12px">Discover DEX</button>
+    <button class="btn btn-refresh" onclick="refresh()">⟳ Refresh</button>
+  </div>
 </div>
 
 <div class="main">
@@ -527,6 +532,31 @@ function switchTF(tf){
 }
 function switchCat(c){cCat=c||null;loadData(cTF)}
 function doS(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='fg'||c==='mcap'?1:-1}renderTable()}
+
+async function addToken(){
+  const input=document.getElementById('addTokenInput').value.trim();
+  if(!input){alert('Paste a DexScreener URL or contract address');return}
+  document.getElementById('addTokenInput').value='Adding...';
+  try{
+    const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:input})});
+    const d2=await r.json();
+    if(d2.error){alert('Error: '+d2.error);document.getElementById('addTokenInput').value=input;return}
+    document.getElementById('addTokenInput').value='';
+    alert('Added: '+d2.token.symbol+' ('+d2.token.name+') — F&G: '+d2.token.fg.toFixed(1)+' — '+d2.token.zone);
+    loadData(cTF); // Reload to show new token
+  }catch(e){alert('Failed: '+e.message);document.getElementById('addTokenInput').value=input}
+}
+
+async function discoverDex(){
+  const btn=event.target;btn.textContent='Discovering...';btn.disabled=true;
+  try{
+    const r=await fetch('/api/discover');
+    const d2=await r.json();
+    btn.textContent='Discover DEX';btn.disabled=false;
+    alert('Discovered '+d2.discovered+' DEX tokens across chains: '+JSON.stringify(d2.chains));
+    loadData(cTF);
+  }catch(e){btn.textContent='Discover DEX';btn.disabled=false;alert('Failed: '+e.message)}
+}
 
 window.addEventListener('resize',()=>{if(D)renderScatter()});
 loadData('D');
