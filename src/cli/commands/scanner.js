@@ -240,21 +240,27 @@ register('scan', {
       handler: (opts) => dex.dexVsCexScan({ top: opts.top ? Number(opts.top) : 20 }),
     }],
     ['production', {
-      description: 'Production scan: validated strategies only, regime-filtered, position-limited',
+      description: 'Full universe scan: ALL symbols, tiered by confidence. Tier 1 = proven edge, Tier 2 = weak edge, Tier 3 = unproven',
       options: {
-        us: { type: 'string', description: 'US stock count (default 500)' },
-        asx: { type: 'string', description: 'ASX stock count (default 200)' },
-        crypto: { type: 'string', description: 'Crypto count (default 50)' },
+        us: { type: 'string', description: 'US stock count (default 2000)' },
+        asx: { type: 'string', description: 'ASX stock count (default 2000)' },
+        crypto: { type: 'string', description: 'Crypto count (default 200)' },
+        top: { type: 'string', short: 'n', description: 'Top N per tier (default 20)' },
       },
-      handler: (opts) => production.productionScan({
-        us: opts.us ? Number(opts.us) : 500,
-        asx: opts.asx ? Number(opts.asx) : 200,
-        crypto: opts.crypto ? Number(opts.crypto) : 50,
+      handler: (opts) => production.universeProduction({
+        us: opts.us ? Number(opts.us) : 2000,
+        asx: opts.asx ? Number(opts.asx) : 2000,
+        crypto: opts.crypto ? Number(opts.crypto) : 200,
+        top: opts.top ? Number(opts.top) : 20,
       }),
     }],
     ['watch', {
       description: 'Show symbols approaching fear threshold (within 5 points of rare fear)',
       handler: () => production.watchList(),
+    }],
+    ['outperformers', {
+      description: 'Analyze which symbols historically outperform from fear signals',
+      handler: () => production.analyzeOutperformers(),
     }],
     ['backtest', {
       description: 'Backtest F&G fear signals: historical win rates, timing, optimal entry strategies',
