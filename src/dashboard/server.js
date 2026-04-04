@@ -8,6 +8,7 @@ import { dirname, join } from 'path';
 import { loadCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
 import { addToken, discoverTokens, loadDexTokens } from '../core/dex_universe.js';
+import { getTracking, logSignal } from '../core/fg_tracker.js';
 import { computeTimeSeries } from '../core/fg_backtest.js';
 import { fetchOhlcv } from '../core/unified_data.js';
 
@@ -136,6 +137,21 @@ app.post('/api/watchlist/remove', (req, res) => {
   const favs = loadFavorites().filter(s => s !== sym);
   saveFavorites(favs);
   res.json({ success: true, favorites: favs });
+});
+
+// ─── Performance tracking ───────────────────────────────────────────────────
+
+app.get('/api/tracking', (req, res) => {
+  try { res.json(getTracking()); }
+  catch (e) { res.json({ error: e.message }); }
+});
+
+app.post('/api/track', (req, res) => {
+  try {
+    const { symbol, price, type } = req.body;
+    const result = logSignal({ symbol, entry_price: price, type: type || 'MANUAL', fg_score: null, class: 'DASHBOARD', tier: 0, confidence: 0 });
+    res.json(result || { error: 'Already tracking or duplicate' });
+  } catch (e) { res.json({ error: e.message }); }
 });
 
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
