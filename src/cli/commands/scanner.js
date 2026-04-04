@@ -5,6 +5,7 @@ import * as fgFast from '../../core/fg_fast_scanner.js';
 import * as fgExact from '../../core/fg_exact_scanner.js';
 import * as fgMtf from '../../core/fg_mtf.js';
 import * as dex from '../../core/dexscreener.js';
+import * as universe from '../../core/fg_universe.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -157,6 +158,28 @@ register('scan', {
           symbols,
         });
       },
+    }],
+    ['universe', {
+      description: 'Scan top N crypto tokens by market cap with F&G scoring. Uses Binance + CryptoCompare + Yahoo + MEXC.',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Tokens to scan (default 250)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
+        sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite, market_cap (default: fear)' },
+      },
+      handler: (opts) => universe.universeScan({
+        universe: opts.universe ? Number(opts.universe) : 250,
+        top: opts.top ? Number(opts.top) : 50,
+        sort: opts.sort || 'fear',
+      }),
+    }],
+    ['universe-warm', {
+      description: 'Warm cache for top N tokens by market cap',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Tokens to warm (default 500)' },
+      },
+      handler: (opts) => universe.warmUniverse({
+        universe: opts.universe ? Number(opts.universe) : 500,
+      }),
     }],
     ['dex', {
       description: 'Scan top DEX pairs by chain with on-chain F&G scoring (DexScreener)',
