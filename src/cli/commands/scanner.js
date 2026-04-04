@@ -160,43 +160,64 @@ register('scan', {
       },
     }],
     ['universe', {
-      description: 'Scan top N crypto tokens by market cap with F&G scoring. Uses Binance + CryptoCompare + Yahoo + MEXC.',
+      description: 'Scan crypto tokens by market cap. Presets: crypto_1000, crypto_full',
       options: {
         universe: { type: 'string', short: 'u', description: 'Tokens to scan (default 250)' },
         top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
-        sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite, market_cap (default: fear)' },
+        sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite (default: fear)' },
+        preset: { type: 'string', short: 'p', description: 'Preset: crypto_1000, crypto_full' },
       },
       handler: (opts) => universe.universeScan({
         universe: opts.universe ? Number(opts.universe) : 250,
         top: opts.top ? Number(opts.top) : 50,
         sort: opts.sort || 'fear',
-      }),
-    }],
-    ['universe-warm', {
-      description: 'Warm cache for top N tokens by market cap',
-      options: {
-        universe: { type: 'string', short: 'u', description: 'Tokens to warm (default 500)' },
-        market: { type: 'string', short: 'm', description: 'Market: crypto, us, asx (default: crypto)' },
-      },
-      handler: (opts) => universe.warmUniverse({
-        universe: opts.universe ? Number(opts.universe) : 500,
-        market: opts.market || 'crypto',
+        preset: opts.preset,
       }),
     }],
     ['stocks', {
-      description: 'Scan US or ASX stocks with F&G scoring via Yahoo Finance',
+      description: 'Scan US or ASX stocks. Presets: sp500, asx_200, asx_mining, asx_full, us_full',
       options: {
         market: { type: 'string', short: 'm', description: 'Market: us or asx (default: us)' },
-        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 100)' },
+        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 500)' },
         top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
         sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite (default: fear)' },
+        preset: { type: 'string', short: 'p', description: 'Preset: sp500, asx_200, asx_mining, asx_full, us_full' },
       },
       handler: (opts) => universe.stockScan({
         market: opts.market || 'us',
-        universe: opts.universe ? Number(opts.universe) : 100,
+        universe: opts.universe ? Number(opts.universe) : 500,
         top: opts.top ? Number(opts.top) : 50,
         sort: opts.sort || 'fear',
+        preset: opts.preset,
       }),
+    }],
+    ['all', {
+      description: 'Scan ALL markets combined: US stocks + ASX stocks + crypto',
+      options: {
+        us: { type: 'string', description: 'US stock count (default 500)' },
+        asx: { type: 'string', description: 'ASX stock count (default 200)' },
+        crypto: { type: 'string', description: 'Crypto count (default 250)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
+      },
+      handler: (opts) => universe.scanAll({
+        us: opts.us ? Number(opts.us) : 500,
+        asx: opts.asx ? Number(opts.asx) : 200,
+        crypto: opts.crypto ? Number(opts.crypto) : 250,
+        top: opts.top ? Number(opts.top) : 50,
+      }),
+    }],
+    ['daily', {
+      description: 'Daily full scan: 500 US + 300 ASX + 250 crypto → top fear buys + greed sells',
+      options: {
+        top: { type: 'string', short: 'n', description: 'Top N per category (default 30)' },
+      },
+      handler: (opts) => universe.dailyScan({
+        top: opts.top ? Number(opts.top) : 30,
+      }),
+    }],
+    ['universe-stats', {
+      description: 'Show available universe sizes: US stocks, ASX stocks, crypto tokens',
+      handler: () => universe.getUniverseStats(),
     }],
     ['dex', {
       description: 'Scan top DEX pairs by chain with on-chain F&G scoring (DexScreener)',
