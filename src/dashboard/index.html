@@ -3,88 +3,117 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>F&G Scanner Dashboard</title>
+<title>F&G Scanner — Fear & Greed Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; }
-.header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-.header h1 { font-size: 18px; color: #f0f6fc; }
-.header .meta { font-size: 12px; color: #8b949e; }
-.header .actions { display: flex; gap: 8px; }
-.btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: 0.15s; }
-.btn:hover { background: #30363d; border-color: #8b949e; }
-.btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
-.btn.refresh { background: #238636; border-color: #238636; color: #fff; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0e11;color:#eaecef}
+a{color:#f0b90b;text-decoration:none}
 
-.heat { display: flex; gap: 20px; padding: 16px 20px; background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: wrap; align-items: center; }
-.heat-score { font-size: 42px; font-weight: 700; min-width: 80px; text-align: center; }
-.heat-bar { flex: 1; min-width: 200px; }
-.heat-bar-inner { height: 8px; border-radius: 4px; display: flex; overflow: hidden; }
-.heat-bar-fear { background: #f85149; }
-.heat-bar-neutral { background: #8b949e; }
-.heat-bar-greed { background: #3fb950; }
-.heat-stats { display: flex; gap: 16px; font-size: 13px; color: #8b949e; margin-top: 4px; }
-.heat-label { font-size: 14px; color: #8b949e; }
+/* Header */
+.header{background:#181a20;border-bottom:1px solid #2b2f36;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.header h1{font-size:20px;color:#eaecef;font-weight:700}
+.header h1 span{color:#f0b90b}
+.header-meta{font-size:12px;color:#848e9c}
+.header-actions{display:flex;gap:8px;align-items:center}
 
-.tf-bar { display: flex; gap: 4px; padding: 8px 20px; background: #0d1117; border-bottom: 1px solid #30363d; flex-wrap: wrap; }
-.cat-bar { display: flex; gap: 4px; padding: 8px 20px; background: #0d1117; border-bottom: 1px solid #30363d; flex-wrap: wrap; overflow-x: auto; }
-.cat-btn { font-size: 11px; padding: 4px 10px; white-space: nowrap; }
-.cat-btn .cnt { color: #8b949e; margin-left: 4px; }
+/* Buttons */
+.btn{background:#2b2f36;border:1px solid #363a45;color:#eaecef;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;transition:.15s}
+.btn:hover{background:#363a45;border-color:#5e6673}
+.btn.active{background:#f0b90b;border-color:#f0b90b;color:#181a20;font-weight:600}
+.btn-refresh{background:#0ecb81;border-color:#0ecb81;color:#181a20;font-weight:600}
 
-.search-bar { padding: 8px 20px; background: #0d1117; }
-.search-bar input { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; width: 100%; max-width: 300px; font-size: 14px; }
+/* Layout */
+.main{display:flex;gap:0;flex-wrap:wrap}
+.sidebar{width:280px;min-width:260px;padding:16px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2b2f36;background:#181a20}
+.chart-area{flex:1;min-width:0;position:relative}
+.chart-container{position:relative;height:480px;background:#181a20;border-bottom:1px solid #2b2f36}
+.chart-container canvas{position:absolute;top:0;left:0}
 
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-thead th { background: #161b22; color: #8b949e; text-align: left; padding: 8px 12px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid #30363d; position: sticky; top: 0; z-index: 1; }
-thead th:hover { color: #f0f6fc; }
-tbody tr { border-bottom: 1px solid #21262d; }
-tbody tr:hover { background: #161b22; }
-td { padding: 6px 12px; white-space: nowrap; }
-.fg-cell { font-weight: 600; text-align: center; border-radius: 4px; padding: 4px 8px; min-width: 60px; display: inline-block; }
-.zone-ef { background: #910000; color: #fff; }
-.zone-f { background: #d32f2f; color: #fff; }
-.zone-wf { background: #e65100; color: #fff; }
-.zone-n { background: #616161; color: #fff; }
-.zone-wg { background: #00796b; color: #fff; }
-.zone-g { background: #388e3c; color: #fff; }
-.zone-eg { background: #1b5e20; color: #fff; }
-.swing-entry { background: #238636; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; animation: pulse 2s infinite; }
-.swing-watch { background: #9e6a03; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-.swing-exit { background: #da3633; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.swing-profit { background: #da3633; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-.tier { font-size: 11px; color: #8b949e; }
-.page-info { padding: 8px 20px; font-size: 12px; color: #8b949e; display: flex; justify-content: space-between; flex-wrap: wrap; }
-.cats-summary { padding: 10px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.cat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; }
-.cat-card-name { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
-.cat-card-fg { font-size: 24px; font-weight: 700; }
-.cat-card-stats { font-size: 11px; color: #8b949e; margin-top: 4px; }
-@media (max-width: 768px) { .hide-mobile { display: none; } }
+/* Cards */
+.card{background:#1e2329;border:1px solid #2b2f36;border-radius:8px;padding:16px}
+.card-title{font-size:12px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.card-value{font-size:36px;font-weight:700}
+.card-bar{height:6px;border-radius:3px;margin-top:10px;position:relative;overflow:hidden}
+.card-bar-bg{position:absolute;inset:0;background:linear-gradient(to right,#0ecb81,#f0b90b,#f6465d)}
+.card-bar-thumb{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #181a20;transform:translateX(-50%)}
+.card-labels{display:flex;justify-content:space-between;font-size:11px;color:#848e9c;margin-top:4px}
+.card-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2b2f36;font-size:13px}
+.card-row:last-child{border:none}
+.dot-green{display:inline-block;width:8px;height:8px;border-radius:50%;background:#0ecb81;margin-right:6px}
+.dot-red{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f6465d;margin-right:6px}
+.dot-grey{display:inline-block;width:8px;height:8px;border-radius:50%;background:#848e9c;margin-right:6px}
+
+/* TF bar */
+.tf-bar{position:absolute;top:12px;right:16px;z-index:10;display:flex;gap:4px}
+.tf-bar .btn{font-size:11px;padding:4px 10px}
+
+/* Category tabs */
+.cat-tabs{display:flex;gap:4px;padding:10px 24px;background:#0b0e11;overflow-x:auto;border-bottom:1px solid #2b2f36}
+.cat-tabs .btn{font-size:11px;padding:4px 10px;white-space:nowrap}
+.cat-tabs .cnt{color:#848e9c;margin-left:3px;font-size:10px}
+
+/* Search + filters */
+.filters-bar{display:flex;gap:12px;padding:10px 24px;align-items:center;flex-wrap:wrap}
+.filters-bar input{background:#1e2329;border:1px solid #2b2f36;color:#eaecef;padding:8px 12px;border-radius:4px;font-size:13px;width:200px}
+.filters-bar label{font-size:12px;color:#848e9c}
+
+/* Table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{background:#181a20;color:#848e9c;text-align:left;padding:10px 12px;cursor:pointer;white-space:nowrap;border-bottom:1px solid #2b2f36;position:sticky;top:0;z-index:1;font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+thead th:hover{color:#eaecef}
+tbody tr{border-bottom:1px solid #1e2329}
+tbody tr:hover{background:#1e2329}
+td{padding:8px 12px;white-space:nowrap}
+.sym-name{font-weight:600;color:#eaecef}
+.fg-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:600;font-size:12px;min-width:52px;text-align:center;color:#fff}
+.fg-ef{background:#910000}.fg-f{background:#d32f2f}.fg-wf{background:#e65100}
+.fg-n{background:#474d57}.fg-wg{background:#00796b}.fg-g{background:#2e7d32}.fg-eg{background:#1b5e20}
+.swing-badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.sw-entry{background:#0ecb81;color:#181a20;animation:pulse 2s infinite}
+.sw-watch{background:#f0b90b;color:#181a20}
+.sw-exit{background:#f6465d;color:#fff}
+.sw-profit{background:#f6465d;color:#fff;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.pct-pos{color:#0ecb81}.pct-neg{color:#f6465d}
+.page-bar{padding:8px 24px;display:flex;justify-content:space-between;font-size:12px;color:#848e9c;align-items:center;flex-wrap:wrap;gap:8px}
+
+@media(max-width:900px){
+  .sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}
+  .sidebar .card{min-width:200px}
+  .chart-container{height:350px}
+  .hide-m{display:none}
+}
 </style>
 </head>
 <body>
 
 <div class="header">
   <div>
-    <h1>F&G Scanner</h1>
-    <div class="meta" id="meta">Loading...</div>
+    <h1>F&G <span>Scanner</span></h1>
+    <div class="header-meta" id="meta">Loading...</div>
   </div>
-  <div class="actions">
-    <button class="btn refresh" onclick="refresh()">Refresh</button>
+  <div class="header-actions">
+    <button class="btn btn-refresh" onclick="refresh()">⟳ Refresh</button>
   </div>
 </div>
 
-<div class="heat" id="heat"></div>
+<div class="main">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="chart-area">
+    <div class="chart-container">
+      <div class="tf-bar" id="tfBar"></div>
+      <canvas id="scatter"></canvas>
+    </div>
+  </div>
+</div>
 
-<div class="tf-bar" id="tfBar"></div>
-<div class="cat-bar" id="catBar"></div>
+<div class="cat-tabs" id="catTabs"></div>
 
-<div class="cats-summary" id="catsSummary"></div>
-
-<div class="search-bar">
-  <input type="text" id="search" placeholder="Search symbol..." oninput="filterTable()">
+<div class="filters-bar">
+  <input type="text" id="search" placeholder="Search symbol..." oninput="renderTable()">
+  <label><input type="checkbox" id="fearOnly" onchange="renderTable()"> Fear only</label>
 </div>
 
 <div class="table-wrap">
@@ -93,167 +122,232 @@ td { padding: 6px 12px; white-space: nowrap; }
     <tbody id="tbody"></tbody>
   </table>
 </div>
-
-<div class="page-info" id="pageInfo"></div>
+<div class="page-bar" id="pageBar"></div>
 
 <script>
-let DATA = null;
-let currentTF = 'D';
-let currentCat = null;
-let sortCol = 'fg';
-let sortDir = 1; // 1=asc, -1=desc
-let pageSize = 100;
+let DATA=null, chart=null, currentTF='D', currentCat=null, sortCol='fg', sortDir=1, pageSize=100;
+const TFS=[{k:'D',l:'Daily'},{k:'15',l:'15m'},{k:'60',l:'1H'},{k:'240',l:'4H'},{k:'W',l:'Weekly'}];
 
-const TFS = [
-  { key: 'D', label: 'Daily' },
-  { key: '15', label: '15m' },
-  { key: '60', label: '1H' },
-  { key: '240', label: '4H' },
-  { key: 'W', label: 'Weekly' },
-];
-
-async function loadData(tf) {
-  const cat = currentCat ? '&category=' + encodeURIComponent(currentCat) : '';
-  const res = await fetch('/api/cached?tf=' + tf + cat);
-  DATA = await res.json();
+async function loadData(tf){
+  const cat=currentCat?'&category='+encodeURIComponent(currentCat):'';
+  const res=await fetch('/api/cached?tf='+tf+cat);
+  DATA=await res.json();
   render();
 }
 
-async function refresh() {
-  document.getElementById('meta').textContent = 'Refreshing...';
-  await loadData(currentTF);
-}
+async function refresh(){document.getElementById('meta').textContent='Refreshing...';await loadData(currentTF)}
 
-function render() {
-  if (!DATA) return;
+function render(){
+  if(!DATA)return;
+  document.getElementById('meta').textContent=
+    DATA.total.toLocaleString()+' symbols · '+DATA.tf+' · '+new Date(DATA.updated).toLocaleString();
 
-  // Meta
-  document.getElementById('meta').textContent =
-    DATA.total + ' symbols | ' + DATA.tf + ' | ' + new Date(DATA.updated).toLocaleString();
-
-  // Heat
-  const pctFear = DATA.total > 0 ? Math.round((DATA.rows.filter(r => r.fg <= -5).length / DATA.total) * 100) : 0;
-  const pctGreed = DATA.total > 0 ? Math.round((DATA.rows.filter(r => r.fg >= 5).length / DATA.total) * 100) : 0;
-  const pctNeutral = 100 - pctFear - pctGreed;
-  const heatColor = DATA.avgFG <= -15 ? '#d32f2f' : DATA.avgFG <= -5 ? '#e65100' : DATA.avgFG >= 15 ? '#1b5e20' : DATA.avgFG >= 5 ? '#388e3c' : '#616161';
-  document.getElementById('heat').innerHTML = `
-    <div>
-      <div class="heat-label">Average F&G (${DATA.tf})</div>
-      <div class="heat-score" style="color:${heatColor}">${DATA.avgFG > 0 ? '+' : ''}${DATA.avgFG}</div>
-    </div>
-    <div class="heat-bar">
-      <div class="heat-bar-inner">
-        <div class="heat-bar-fear" style="width:${pctFear}%"></div>
-        <div class="heat-bar-neutral" style="width:${pctNeutral}%"></div>
-        <div class="heat-bar-greed" style="width:${pctGreed}%"></div>
-      </div>
-      <div class="heat-stats">
-        <span style="color:#f85149">Fear: ${pctFear}%</span>
-        <span>Neutral: ${pctNeutral}%</span>
-        <span style="color:#3fb950">Greed: ${pctGreed}%</span>
-        <span>Oversold: ${DATA.oversold}</span>
-        <span>Overbought: ${DATA.overbought}</span>
-      </div>
-    </div>`;
-
-  // TF bar
-  document.getElementById('tfBar').innerHTML = TFS.map(tf =>
-    `<button class="btn ${tf.key === currentTF ? 'active' : ''}" onclick="switchTF('${tf.key}')">${tf.label}</button>`
-  ).join('');
-
-  // Category cards
-  document.getElementById('catsSummary').innerHTML = DATA.categories.map(c => {
-    const color = c.avg <= -15 ? '#d32f2f' : c.avg <= -5 ? '#e65100' : c.avg >= 15 ? '#1b5e20' : c.avg >= 5 ? '#388e3c' : '#8b949e';
-    return `<div class="cat-card">
-      <div class="cat-card-name">${c.name}</div>
-      <div class="cat-card-fg" style="color:${color}">${c.avg > 0 ? '+' : ''}${c.avg}</div>
-      <div class="cat-card-stats">${c.count} symbols | ${c.pctFear}% fear | ${c.entries} entries</div>
-    </div>`;
-  }).join('');
-
-  // Category filter bar
-  const allCats = [{ name: 'All', count: DATA.total }, ...DATA.categories];
-  document.getElementById('catBar').innerHTML = allCats.map(c => {
-    const isActive = (c.name === 'All' && !currentCat) || c.name === currentCat;
-    return `<button class="btn cat-btn ${isActive ? 'active' : ''}" onclick="switchCat('${c.name === 'All' ? '' : c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
-  }).join('');
-
+  renderSidebar();
+  renderTFBar();
+  renderCatTabs();
+  renderScatter();
   renderTable();
 }
 
-function renderTable() {
-  const filtered = getFilteredRows();
-  const page = filtered.slice(0, pageSize);
+function renderSidebar(){
+  const pctFear=DATA.total>0?Math.round(DATA.rows.filter(r=>r.fg<=-5).length/DATA.total*100):0;
+  const pctGreed=DATA.total>0?Math.round(DATA.rows.filter(r=>r.fg>=5).length/DATA.total*100):0;
+  const thumbPos=Math.max(0,Math.min(100,(DATA.avgFG+50)/100*100));
+  const avgColor=DATA.avgFG<=-15?'#f6465d':DATA.avgFG<=-5?'#e65100':DATA.avgFG>=15?'#0ecb81':DATA.avgFG>=5?'#2e7d32':'#848e9c';
 
-  // Header
-  const cols = [
-    { key: '#', label: '#', sortable: false },
-    { key: 'symbol', label: 'Symbol', sortable: true },
-    { key: 'fg', label: 'F&G', sortable: true },
-    { key: 'zone', label: 'Zone', sortable: false },
-    { key: 'category', label: 'Category', sortable: true, cls: 'hide-mobile' },
-    { key: 'swing', label: 'Swing', sortable: false },
-    { key: 'tier', label: 'Tier', sortable: true, cls: 'hide-mobile' },
-    { key: 'rsi', label: 'RSI', sortable: true, cls: 'hide-mobile' },
-  ];
+  document.getElementById('sidebar').innerHTML=`
+    <div class="card">
+      <div class="card-title">Average F&G Score (${DATA.tf})</div>
+      <div class="card-value" style="color:${avgColor}">${DATA.avgFG>0?'+':''}${DATA.avgFG}</div>
+      <div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-thumb" style="left:${thumbPos}%"></div></div>
+      <div class="card-labels"><span>Fear</span><span>Greed</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Fear vs Greed</div>
+      <div class="card-row"><span><span class="dot-green"></span>In Fear</span><span style="color:#0ecb81;font-weight:600">${pctFear}%</span></div>
+      <div class="card-row"><span><span class="dot-grey"></span>Neutral</span><span>${100-pctFear-pctGreed}%</span></div>
+      <div class="card-row"><span><span class="dot-red"></span>In Greed</span><span style="color:#f6465d;font-weight:600">${pctGreed}%</span></div>
+      <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:8px">
+        <div style="width:${pctFear}%;background:#0ecb81"></div>
+        <div style="width:${100-pctFear-pctGreed}%;background:#474d57"></div>
+        <div style="width:${pctGreed}%;background:#f6465d"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Oversold / Overbought</div>
+      <div class="card-row"><span>Oversold (F&G < -25)</span><span style="color:#0ecb81">${DATA.oversold}</span></div>
+      <div class="card-row"><span>Overbought (F&G > +25)</span><span style="color:#f6465d">${DATA.overbought}</span></div>
+      <div class="card-row"><span>Entry Zone signals</span><span style="color:#f0b90b">${DATA.rows.filter(r=>r.swing==='ENTRY ZONE').length}</span></div>
+    </div>`;
+}
 
-  document.getElementById('thead').innerHTML = cols.map(c => {
-    const arrow = sortCol === c.key ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
-    const click = c.sortable ? ` onclick="sortBy('${c.key}')"` : '';
-    return `<th${click} class="${c.cls || ''}">${c.label}${arrow}</th>`;
+function renderTFBar(){
+  document.getElementById('tfBar').innerHTML=TFS.map(t=>`<button class="btn ${t.k===currentTF?'active':''}" onclick="switchTF('${t.k}')">${t.l}</button>`).join('');
+}
+
+function renderCatTabs(){
+  const all=[{name:'All',count:DATA.total},...DATA.categories.map(c=>({name:c.name,count:c.count,avg:c.avg}))];
+  document.getElementById('catTabs').innerHTML=all.map(c=>{
+    const active=(c.name==='All'&&!currentCat)||c.name===currentCat;
+    return`<button class="btn ${active?'active':''}" onclick="switchCat('${c.name==='All'?'':c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
   }).join('');
+}
 
-  // Body
-  document.getElementById('tbody').innerHTML = page.map((r, i) => {
-    const fgClass = r.fg <= -30 ? 'zone-ef' : r.fg <= -15 ? 'zone-f' : r.fg <= -5 ? 'zone-wf' :
-      r.fg <= 5 ? 'zone-n' : r.fg <= 15 ? 'zone-wg' : r.fg <= 30 ? 'zone-g' : 'zone-eg';
-    const swingHtml = r.swing === 'ENTRY ZONE' ? '<span class="swing-entry">ENTRY ZONE</span>' :
-      r.swing === 'WATCHING' ? '<span class="swing-watch">WATCHING</span>' :
-      r.swing === 'EXIT ZONE' ? '<span class="swing-exit">EXIT ZONE</span>' :
-      r.swing === 'TAKE PROFIT' ? '<span class="swing-profit">TAKE PROFIT</span>' : '';
-    return `<tr>
-      <td>${i + 1}</td>
-      <td><strong>${r.symbol}</strong></td>
-      <td><span class="fg-cell ${fgClass}">${r.fg > 0 ? '+' : ''}${r.fg.toFixed(1)}</span></td>
+function renderScatter(){
+  const canvas=document.getElementById('scatter');
+  const container=canvas.parentElement;
+  canvas.width=container.clientWidth;
+  canvas.height=container.clientHeight;
+
+  // Prepare data points — sample max 500 for performance, prefer extremes
+  let pts=[...DATA.rows];
+  if(pts.length>500){
+    const extreme=pts.filter(r=>Math.abs(r.fg)>15).slice(0,250);
+    const rest=pts.filter(r=>Math.abs(r.fg)<=15);
+    const sample=rest.sort(()=>Math.random()-.5).slice(0,250);
+    pts=[...extreme,...sample];
+  }
+
+  const data=pts.map(r=>({
+    x:Math.max(1,r.fg),
+    y:r.fg,
+    label:r.symbol,
+    fg:r.fg,
+    cat:r.category,
+    swing:r.swing,
+  }));
+
+  // Assign x = index (spread across width) sorted by fg
+  data.sort((a,b)=>a.fg-b.fg);
+  data.forEach((d,i)=>{d.x=i});
+
+  if(chart)chart.destroy();
+
+  chart=new Chart(canvas,{
+    type:'scatter',
+    data:{
+      datasets:[{
+        data:data.map(d=>({x:d.x,y:d.y})),
+        pointBackgroundColor:data.map(d=>d.fg<=-25?'#0ecb81':d.fg<=-10?'#26a17b':d.fg>=25?'#f6465d':d.fg>=10?'#cf304a':'#848e9c'),
+        pointBorderColor:'transparent',
+        pointRadius:data.map(d=>d.swing==='ENTRY ZONE'?5:3),
+        pointHoverRadius:7,
+      }]
+    },
+    options:{
+      responsive:false,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            label:function(ctx){
+              const d=data[ctx.dataIndex];
+              return `${d.label}: F&G ${d.fg>0?'+':''}${d.fg.toFixed(1)} · ${d.cat}${d.swing?' · '+d.swing:''}`;
+            }
+          },
+          backgroundColor:'#1e2329',borderColor:'#2b2f36',borderWidth:1,titleColor:'#eaecef',bodyColor:'#eaecef',
+        },
+      },
+      scales:{
+        x:{display:false},
+        y:{
+          min:-45,max:45,
+          grid:{color:'#1e2329'},
+          ticks:{color:'#848e9c',callback:v=>v>0?'+'+v:v},
+          title:{display:true,text:'F&G Score',color:'#848e9c'},
+        }
+      }
+    },
+    plugins:[{
+      id:'bgZones',
+      beforeDraw(ch){
+        const ctx=ch.ctx;
+        const{top,bottom,left,right}=ch.chartArea;
+        const yScale=ch.scales.y;
+        const zones=[
+          {from:30,to:45,color:'rgba(145,0,0,0.25)'},
+          {from:15,to:30,color:'rgba(246,70,93,0.15)'},
+          {from:5,to:15,color:'rgba(246,70,93,0.07)'},
+          {from:-5,to:5,color:'rgba(71,77,87,0.15)'},
+          {from:-15,to:-5,color:'rgba(14,203,129,0.07)'},
+          {from:-30,to:-15,color:'rgba(14,203,129,0.15)'},
+          {from:-45,to:-30,color:'rgba(14,203,129,0.25)'},
+        ];
+        for(const z of zones){
+          const y1=yScale.getPixelForValue(z.to);
+          const y2=yScale.getPixelForValue(z.from);
+          ctx.fillStyle=z.color;
+          ctx.fillRect(left,y1,right-left,y2-y1);
+        }
+        // Zone labels
+        ctx.fillStyle='rgba(234,236,239,0.3)';
+        ctx.font='11px -apple-system,sans-serif';
+        ctx.textAlign='left';
+        const labels=[
+          [35,'EXTREME GREED'],[22,'GREED'],[10,'WEAK GREED'],[0,'NEUTRAL'],[-10,'WEAK FEAR'],[-22,'FEAR'],[-37,'EXTREME FEAR']
+        ];
+        for(const[y,txt]of labels){
+          ctx.fillText(txt,left+8,yScale.getPixelForValue(y)+4);
+        }
+      }
+    }]
+  });
+}
+
+function renderTable(){
+  const rows=getFiltered();
+  const page=rows.slice(0,pageSize);
+  const cols=[
+    {k:'#',l:'#',s:false},{k:'symbol',l:'Symbol',s:true},{k:'fg',l:'F&G ('+DATA.tf+')',s:true},
+    {k:'zone',l:'Zone',s:false},{k:'category',l:'Category',s:true,cls:'hide-m'},
+    {k:'swing',l:'Swing',s:false},{k:'tier',l:'Tier',s:true,cls:'hide-m'},
+    {k:'rsi',l:'RSI',s:true,cls:'hide-m'},
+  ];
+  const arrow=k=>sortCol===k?(sortDir===1?' ▲':' ▼'):'';
+  document.getElementById('thead').innerHTML=cols.map(c=>`<th${c.s?` onclick="doSort('${c.k}')"`:''}class="${c.cls||''}">${c.l}${c.s?arrow(c.k):''}</th>`).join('');
+
+  document.getElementById('tbody').innerHTML=page.map((r,i)=>{
+    const fc=r.fg<=-30?'fg-ef':r.fg<=-15?'fg-f':r.fg<=-5?'fg-wf':r.fg<=5?'fg-n':r.fg<=15?'fg-wg':r.fg<=30?'fg-g':'fg-eg';
+    const sw=r.swing==='ENTRY ZONE'?'<span class="swing-badge sw-entry">ENTRY ZONE</span>':
+      r.swing==='WATCHING'?'<span class="swing-badge sw-watch">WATCHING</span>':
+      r.swing==='EXIT ZONE'?'<span class="swing-badge sw-exit">EXIT ZONE</span>':
+      r.swing==='TAKE PROFIT'?'<span class="swing-badge sw-profit">TAKE PROFIT</span>':'';
+    return`<tr>
+      <td>${i+1}</td>
+      <td class="sym-name">${r.symbol}</td>
+      <td><span class="fg-badge ${fc}">${r.fg>0?'+':''}${r.fg.toFixed(1)}</span></td>
       <td>${r.zone}</td>
-      <td class="hide-mobile">${r.category}</td>
-      <td>${swingHtml}</td>
-      <td class="hide-mobile tier">T${r.tier}</td>
-      <td class="hide-mobile">${r.rsi != null ? r.rsi.toFixed(1) : '—'}</td>
+      <td class="hide-m">${r.category}</td>
+      <td>${sw}</td>
+      <td class="hide-m" style="color:#848e9c">T${r.tier}</td>
+      <td class="hide-m">${r.rsi!=null?r.rsi.toFixed(1):'—'}</td>
     </tr>`;
   }).join('');
 
-  document.getElementById('pageInfo').innerHTML =
-    `<span>Showing ${page.length} of ${filtered.length} symbols</span>
-     <span>
-       <button class="btn" onclick="pageSize=50;renderTable()">50</button>
-       <button class="btn" onclick="pageSize=100;renderTable()">100</button>
-       <button class="btn" onclick="pageSize=250;renderTable()">250</button>
-       <button class="btn" onclick="pageSize=9999;renderTable()">All</button>
-     </span>`;
+  document.getElementById('pageBar').innerHTML=`
+    <span>Showing ${page.length} of ${rows.length}</span>
+    <span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="pageSize=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
 }
 
-function getFilteredRows() {
-  let rows = DATA ? [...DATA.rows] : [];
-  const search = document.getElementById('search').value.toUpperCase();
-  if (search) rows = rows.filter(r => r.symbol.includes(search));
-
-  // Sort
-  rows.sort((a, b) => {
-    let va = a[sortCol], vb = b[sortCol];
-    if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
-    return ((va ?? 0) - (vb ?? 0)) * sortDir;
+function getFiltered(){
+  let rows=DATA?[...DATA.rows]:[];
+  const q=document.getElementById('search').value.toUpperCase();
+  if(q)rows=rows.filter(r=>r.symbol.includes(q));
+  if(document.getElementById('fearOnly').checked)rows=rows.filter(r=>r.fg<=-5);
+  rows.sort((a,b)=>{
+    let va=a[sortCol],vb=b[sortCol];
+    if(typeof va==='string')return va.localeCompare(vb)*sortDir;
+    return((va??0)-(vb??0))*sortDir;
   });
-
   return rows;
 }
 
-function switchTF(tf) { currentTF = tf; loadData(tf); }
-function switchCat(cat) { currentCat = cat || null; loadData(currentTF); }
-function sortBy(col) { if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = col === 'fg' ? 1 : -1; } renderTable(); }
-function filterTable() { renderTable(); }
+function switchTF(tf){currentTF=tf;loadData(tf)}
+function switchCat(c){currentCat=c||null;loadData(currentTF)}
+function doSort(c){if(sortCol===c)sortDir*=-1;else{sortCol=c;sortDir=c==='fg'?1:-1}renderTable()}
 
-// Initial load
+window.addEventListener('resize',()=>{if(DATA)renderScatter()});
 loadData('D');
 </script>
 </body>
