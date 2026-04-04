@@ -1,0 +1,36 @@
+//@version=6
+indicator('Trading Psychology - Fear & Greed Index by DGT', 'F&G', false)
+smoothLength = input.int(5, 'Smoothing', minval=1, maxval=13)
+faster = input(false, 'Faster Calc')
+daily = input(false, 'Daily Index')
+fastLength = faster ? 13 : 21
+slowLength = faster ? 89 : 144
+pmacd = (close / ta.ema(close, slowLength) - 1) * 100
+ror = (close - close[slowLength]) / close[slowLength] * 100
+moneyFlow = ta.rma((2*close - low - high)/(high - low) * volume, fastLength) / ta.rma(volume, fastLength) * 100
+vix = request.security('VIX', timeframe.period, -(close / ta.ema(close, slowLength) - 1) * 100, barmerge.gaps_off, barmerge.lookahead_off)
+gold = request.security('GOLD', timeframe.period, -(1 - close[fastLength] / close) * 100, barmerge.gaps_off, barmerge.lookahead_off)
+cycle_raw = not na(moneyFlow) ? math.avg(pmacd, ror, moneyFlow, vix, gold) : math.avg(pmacd, ror, vix, gold)
+cycle = ta.rma(cycle_raw, smoothLength)
+fgColor = cycle < -41 ? #910000 : cycle < -25 ? #ff5252 : cycle < -10 ? #ff9800 : cycle < -5 ? #fecb35 : cycle < 5 ? #A19F8F : cycle < 10 ? #65a095 : cycle < 41 ? #50b050 : cycle < 63 ? #2e8f2e : #006400
+plot(cycle, 'F&G Index', fgColor, 2)
+hline(0, 'Zero', color.gray, hline.style_dotted)
+hline(25, 'Greed', color.green, hline.style_dotted)
+hline(-25, 'Fear', color.red, hline.style_dotted)
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.rgb(0,0,0,80))
+if barstate.islast
+    table.cell(t, 0, 0, 'F&G Score', text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 0, str.tostring(math.round(cycle, 2)), text_color=fgColor, text_size=size.small)
+    table.cell(t, 0, 1, 'Price Dev', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 1, str.tostring(math.round(pmacd, 2)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 2, 'Momentum', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 2, str.tostring(math.round(ror, 2)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 3, 'Money Flow', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 3, str.tostring(math.round(moneyFlow, 2)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 4, 'VIX', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(math.round(nz(vix), 2)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 5, 'Gold', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 5, str.tostring(math.round(nz(gold), 2)), text_color=color.white, text_size=size.tiny)
+    zone = cycle >= 41 ? 'EXTREME GREED' : cycle >= 10 ? 'GREED' : cycle >= -10 ? 'NEUTRAL' : cycle >= -25 ? 'FEAR' : 'EXTREME FEAR'
+    table.cell(t, 0, 6, 'Zone', text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 6, zone, text_color=fgColor, text_size=size.tiny)

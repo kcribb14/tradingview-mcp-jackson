@@ -1,5 +1,6 @@
 import { register } from '../router.js';
 import * as scanner from '../../core/scanner.js';
+import * as fgScanner from '../../core/fg_scanner.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -34,6 +35,22 @@ register('scan', {
       description: 'Scan for volume anomalies',
       options: { top: { type: 'string', short: 'n', description: 'Top N (default 20)' } },
       handler: (opts) => scanner.bulkScan({ preset: 'volume_anomaly', top: opts.top ? Number(opts.top) : 20 }),
+    }],
+    ['fg', {
+      description: 'Deep F&G scan — reads Fear & Greed indicator per symbol',
+      options: {
+        max: { type: 'string', short: 'n', description: 'Max symbols to scan (default 30)' },
+        wait: { type: 'string', description: 'Wait ms per symbol (default 2000)' },
+      },
+      handler: (opts, positionals) => {
+        const symbols = positionals.length > 0 ? positionals : undefined;
+        return fgScanner.fgScan({
+          max_candidates: opts.max ? Number(opts.max) : 30,
+          wait_ms: opts.wait ? Number(opts.wait) : 2000,
+          skip_screener: !!symbols,
+          symbols,
+        });
+      },
     }],
     ['parse', {
       description: 'Parse a TradingView value string to number',
