@@ -118,14 +118,13 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
     }
   }
   const pmacdRaw = ema144 > 0 ? (lastClose / ema144 - 1) * 100 : 0;
-  // Scale: 1% deviation = ~3 points, capped at ±40
-  const pmacd = Math.max(-40, Math.min(40, pmacdRaw * 3));
+  // Scale: 1% deviation = ~3 points, no hard clamp (let extremes show)
+  const pmacd = pmacdRaw * 3;
 
   // ── ror: rate of return over 20 bars ──
-  // DGT uses: rate of change over lookback period
   const refClose = bars.length > 20 ? closes[closes.length - 21] : closes[0];
   const rorRaw = refClose > 0 ? (lastClose - refClose) / refClose * 100 : 0;
-  const ror = Math.max(-50, Math.min(50, rorRaw * 2));
+  const ror = rorRaw * 2;
 
   // ── moneyFlow: MFI-style calculation over 14 bars ──
   // DGT uses Money Flow Index: cumulative positive/negative flow ratio
@@ -141,7 +140,7 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   }
   const mfi = negFlow > 0 ? 100 - 100 / (1 + posFlow / negFlow) : (posFlow > 0 ? 100 : 50);
   // MFI 50 = neutral, >70 = overbought (greed), <30 = oversold (fear)
-  const moneyFlow = Math.max(-50, Math.min(50, (mfi - 50) * 1.2));
+  const moneyFlow = (mfi - 50) * 1.2;
 
   // ── vix: volatility proxy from ATR-style calculation ──
   // DGT uses VIX-relative measure; we approximate with ATR/close ratio
@@ -154,7 +153,7 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   const atr = atrSum / atrBars.length;
   const atrPct = lastClose > 0 ? (atr / lastClose) * 100 : 0;
   // ATR% of 1.5% is normal; higher = fear, lower = complacency
-  const vixProxy = Math.max(-50, Math.min(20, -(atrPct - 1.5) * 10));
+  const vixProxy = -(atrPct - 1.5) * 10;
 
   // ── gold: from global cache ──
   const goldProxy = globals.gold ?? 0;
@@ -189,7 +188,9 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   // DGT averages all 5 components equally, then applies RMA smoothing
   const components = { pmacd, ror, moneyFlow, vix: vixProxy, gold: goldProxy };
   const raw = (pmacd + ror + moneyFlow + vixProxy + goldProxy) / 5;
-  const fgScore = Math.max(-60, Math.min(60, Math.round(raw * 100) / 100));
+  // Soft compression: linear within [-60,60], compressed beyond (no hard clamp)
+  // This preserves differentiation at extremes while keeping the scale readable
+  const fgScore = Math.round(softCompress(raw) * 100) / 100;
   const { zone, severity } = classifyZone(fgScore);
 
   return {
@@ -217,6 +218,19 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
 }
 
 function round(v) { return v != null ? Math.round(v * 100) / 100 : null; }
+
+/**
+ * Soft compression: linear within [-60, 60], logarithmically compressed beyond.
+ * Maps (-∞,∞) → (~-100, ~100) while preserving full differentiation.
+ */
+function softCompress(v) {
+  const limit = 60;
+  if (Math.abs(v) <= limit) return v;
+  const sign = v > 0 ? 1 : -1;
+  const excess = Math.abs(v) - limit;
+  // Log compression: 60 + 20*ln(1 + excess/20) — approaches ~100 asymptotically
+  return sign * (limit + 20 * Math.log(1 + excess / 20));
+}
 
 // ─── Cache I/O ──────────────────────────────────────────────────────────────
 

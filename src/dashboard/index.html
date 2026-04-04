@@ -414,7 +414,7 @@ function renderScatter(){
           title:{display:true,text:'Market Cap',color:'#848e9c'},
         },
         y:{
-          min:-45,max:45,
+          min:-100,max:100,
           grid:{color:'#1e232960'},
           ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},
           title:{display:true,text:'F&G Score ('+D.tf+')',color:'#848e9c'},
@@ -426,12 +426,13 @@ function renderScatter(){
       beforeDraw(ch){
         const ctx=ch.ctx;const{top,bottom,left,right}=ch.chartArea;const yS=ch.scales.y;
         const zones=[
-          [30,45,'rgba(145,0,0,0.35)'],[20,30,'rgba(246,70,93,0.18)'],[10,20,'rgba(246,70,93,0.08)'],
-          [-10,10,'rgba(71,77,87,0.10)'],[-20,-10,'rgba(14,203,129,0.08)'],[-30,-20,'rgba(14,203,129,0.18)'],[-45,-30,'rgba(14,203,129,0.35)']
+          [60,100,'rgba(145,0,0,0.4)'],[30,60,'rgba(145,0,0,0.25)'],[15,30,'rgba(246,70,93,0.15)'],[5,15,'rgba(246,70,93,0.06)'],
+          [-5,5,'rgba(71,77,87,0.08)'],
+          [-15,-5,'rgba(14,203,129,0.06)'],[-30,-15,'rgba(14,203,129,0.15)'],[-60,-30,'rgba(14,203,129,0.25)'],[-100,-60,'rgba(14,203,129,0.4)']
         ];
         for(const[f,t,c]of zones){const y1=yS.getPixelForValue(t),y2=yS.getPixelForValue(f);ctx.fillStyle=c;ctx.fillRect(left,y1,right-left,y2-y1)}
         ctx.fillStyle='rgba(234,236,239,0.2)';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';
-        for(const[y,txt]of[[37,'EXTREME GREED'],[22,'GREED'],[0,'NEUTRAL'],[-22,'FEAR'],[-37,'EXTREME FEAR']]){
+        for(const[y,txt]of[[80,'EXTREME GREED'],[45,'GREED'],[22,'WEAK GREED'],[0,'NEUTRAL'],[-22,'WEAK FEAR'],[-45,'FEAR'],[-80,'EXTREME FEAR']]){
           ctx.fillText(txt,right-6,yS.getPixelForValue(y)+4);
         }
       }
