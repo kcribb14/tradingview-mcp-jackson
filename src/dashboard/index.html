@@ -101,6 +101,29 @@ td{padding:6px 12px;white-space:nowrap}
 .preset-bar{display:flex;gap:4px;padding:6px 24px;flex-wrap:wrap}
 .preset-bar .btn{font-size:11px;padding:3px 9px}
 
+/* Sticky TF bar */
+.tf-sticky{position:sticky;top:0;z-index:20;background:#0b0e11;border-bottom:1px solid #2b2f36;display:flex;gap:6px;padding:8px 24px;justify-content:center}
+.tf-sticky .tf-btn{padding:12px 24px;font-size:14px;font-weight:500;border-radius:8px;min-width:80px;text-align:center;cursor:pointer;border:1px solid #363a45;background:#2b3139;color:#848e9c;transition:.15s}
+.tf-sticky .tf-btn:hover{border-color:#5e6673;color:#eaecef}
+.tf-sticky .tf-btn.active{background:#f0b90b;border-color:#f0b90b;color:#181a20;font-weight:700}
+.tf-sticky .tf-btn .tf-cnt{font-size:10px;opacity:.7;margin-left:4px}
+
+/* Symbol detail modal */
+.detail-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center}
+.detail-backdrop.open{display:flex}
+.detail-modal{background:#181a20;border:1px solid #2b2f36;border-radius:12px;width:90vw;max-width:1000px;height:75vh;display:flex;flex-direction:column;animation:slideUp .2s}
+.detail-header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #2b2f36}
+.detail-header h2{font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px}
+.detail-charts{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:8px}
+.detail-chart-top{flex:2;position:relative;min-height:0}
+.detail-chart-bottom{flex:1;position:relative;min-height:0;border-top:1px solid #2b2f36;margin-top:4px}
+.detail-chart-top canvas,.detail-chart-bottom canvas{width:100%!important;height:100%!important}
+
+/* Watchlist star */
+.star{cursor:pointer;font-size:16px;color:#363a45;transition:.15s;user-select:none}
+.star:hover{color:#f0b90b}
+.star.active{color:#f0b90b}
+
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 @media(max-width:900px){.sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}.sidebar .card{min-width:180px}.chart-container{height:320px}.hm{display:none}}
@@ -118,12 +141,33 @@ td{padding:6px 12px;white-space:nowrap}
   </div>
 </div>
 
+<div class="tf-sticky" id="tfSticky"></div>
+
 <div class="main">
   <div class="sidebar" id="sidebar"></div>
   <div class="chart-area">
     <div class="chart-container">
-      <div class="tf-bar" id="tfBar"></div>
       <canvas id="scatter"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Symbol Detail Modal -->
+<div class="detail-backdrop" id="detailBackdrop" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-modal">
+    <div class="detail-header">
+      <h2><span id="detailSymbol">—</span>
+        <span class="fg-b z3" id="detailFG">—</span>
+        <span class="star" id="detailStar" onclick="toggleFavDetail()">☆</span>
+      </h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="detailPrice" style="font-size:14px;color:#848e9c">—</span>
+        <button class="modal-close" onclick="closeDetail()">✕</button>
+      </div>
+    </div>
+    <div class="detail-charts">
+      <div class="detail-chart-top"><canvas id="detailPriceChart"></canvas></div>
+      <div class="detail-chart-bottom"><canvas id="detailFGChart"></canvas></div>
     </div>
   </div>
 </div>
@@ -329,24 +373,34 @@ function renderSidebar(){
       <div class="card-row"><span>Entry Zone</span><span style="color:#f0b90b;font-weight:600">${entries}</span></div></div>`;
 }
 
+let FAVS=[];
+async function loadFavs(){try{const r=await fetch('/api/watchlist');FAVS=await r.json()}catch{FAVS=[]}}
+
 function renderTFBar(){
   const tc=D.tfCounts||{};
-  document.getElementById('tfBar').innerHTML=TFS.map(t=>{
+  document.getElementById('tfSticky').innerHTML=TFS.map(t=>{
     const count=tc[t.l]||0;
     const avail=t.k==='D'||count>0;
-    const cls=t.k===cTF?'active':avail?'':'';
-    const style=avail?'':'opacity:0.4;pointer-events:none';
-    const label=avail?t.l:t.l+' (0)';
-    return`<button class="btn ${cls}" style="${style}" onclick="switchTF('${t.k}')">${label}</button>`;
+    const cls=t.k===cTF?'active':'';
+    const style=avail?'':'opacity:0.35;pointer-events:none';
+    return`<button class="tf-btn ${cls}" style="${style}" onclick="switchTF('${t.k}')">${t.l}<span class="tf-cnt">(${t.k==='D'?D.total:count})</span></button>`;
   }).join('');
 }
 
+let showWatchlist=false;
 function renderCatTabs(){
-  const all=[{name:'All',count:D.total},...D.categories.map(c=>({name:c.name,count:c.count}))];
-  document.getElementById('catTabs').innerHTML=all.map(c=>{
-    const a=(c.name==='All'&&!cCat)||c.name===cCat;
-    return`<button class="btn ${a?'active':''}" onclick="switchCat('${c.name==='All'?'':c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
-  }).join('');
+  const favCount=FAVS.length;
+  let html='';
+  // All tab
+  html+='<button class="btn '+((!cCat&&!showWatchlist)?'active':'')+'" onclick="showWatchlist=false;switchCat(\'\')">All<span class="cnt">'+D.total+'</span></button>';
+  // Watchlist tab
+  html+='<button class="btn '+((showWatchlist)?'active':'')+'" onclick="toggleWatchlistView()">Watchlist ★<span class="cnt">'+favCount+'</span></button>';
+  // Category tabs
+  for(const c of D.categories){
+    const a=c.name===cCat&&!showWatchlist;
+    html+='<button class="btn '+(a?'active':'')+'" onclick="showWatchlist=false;switchCat(\''+c.name+'\')">'+c.name+'<span class="cnt">'+c.count+'</span></button>';
+  }
+  document.getElementById('catTabs').innerHTML=html;
 }
 
 function renderScatter(){
@@ -356,6 +410,7 @@ function renderScatter(){
 
   // Select points: filtered, with valid TF score and mcap
   let pts=applyFiltersToRows(D.rows).filter(r=>r.mcap>0&&fgForTF(r)!=null);
+  if(showWatchlist)pts=pts.filter(r=>FAVS.includes(r.symbol));
   if(pts.length>600){
     const ext=pts.filter(r=>Math.abs(fgForTF(r))>15).slice(0,300);
     const rest=pts.filter(r=>Math.abs(fgForTF(r))<=15).sort(()=>Math.random()-.5).slice(0,300);
@@ -461,15 +516,16 @@ function renderTable(){
   const tfKey={D:'fg_D','15':'fg_15m','60':'fg_1H','240':'fg_4H',W:'fg_W'}[cTF]||'fg_D';
 
   const cols=[
+    {k:'fav',l:'★'},
     {k:'#',l:'#'},
     {k:'symbol',l:'Symbol',s:1},
     {k:'price',l:'Price',s:1,c:'hm'},
-    {k:'mcap',l:'Market Cap',s:1,c:'hm'},
+    {k:'mcap',l:'MCap',s:1,c:'hm'},
+    {k:'fg_D',l:'Daily',s:1},
     {k:'fg_15m',l:'15m',s:1,c:'hm'},
     {k:'fg_1H',l:'1H',s:1,c:'hm'},
     {k:'fg_4H',l:'4H',s:1,c:'hm'},
-    {k:'fg_D',l:'Daily',s:1},
-    {k:'fg_W',l:'Weekly',s:1,c:'hm'},
+    {k:'fg_W',l:'Wk',s:1,c:'hm'},
     {k:'zone',l:'Zone'},
     {k:'swing',l:'Swing'},
   ];
@@ -487,12 +543,16 @@ function renderTable(){
     const pr=r.price>=1?'$'+r.price.toFixed(2):r.price>0.001?'$'+r.price.toFixed(4):r.price>0?'$'+r.price.toExponential(2):'—';
     // Highlight active TF column
     const hl=k=>k===tfKey?'font-weight:700':'';
+    const isFav=FAVS.includes(r.symbol);
     return`<tr>
-      <td>${i+1}</td><td class="sym">${r.symbol}</td><td class="hm">${pr}</td><td class="hm mcap">${fmt$(r.mcap)}</td>
+      <td><span class="star ${isFav?'active':''}" onclick="toggleFav('${r.symbol}',event)">${isFav?'★':'☆'}</span></td>
+      <td>${i+1}</td>
+      <td class="sym" style="cursor:pointer" onclick="openDetail('${r.symbol}')">${r.symbol}</td>
+      <td class="hm">${pr}</td><td class="hm mcap">${fmt$(r.mcap)}</td>
+      <td style="${hl('fg_D')}">${fgBadge(r.fg_D)}</td>
       <td class="hm" style="${hl('fg_15m')}">${fgBadge(r.fg_15m)}</td>
       <td class="hm" style="${hl('fg_1H')}">${fgBadge(r.fg_1H)}</td>
       <td class="hm" style="${hl('fg_4H')}">${fgBadge(r.fg_4H)}</td>
-      <td style="${hl('fg_D')}">${fgBadge(r.fg_D)}</td>
       <td class="hm" style="${hl('fg_W')}">${fgBadge(r.fg_W)}</td>
       <td>${zn}</td><td>${sw}</td></tr>`;
   }).join('');
@@ -517,6 +577,7 @@ function applyFiltersToRows(rows){
 
 function getF(){
   let r=D?applyFiltersToRows(D.rows):[];
+  if(showWatchlist)r=r.filter(x=>FAVS.includes(x.symbol));
   const q=(document.getElementById('search')?.value||'').toUpperCase();
   if(q)r=r.filter(x=>x.symbol.includes(q));
   r.sort((a,b)=>{let va=a[sCol],vb=b[sCol];if(typeof va==='string')return va.localeCompare(vb)*sDir;return((va??0)-(vb??0))*sDir});
@@ -532,6 +593,85 @@ function switchTF(tf){
 }
 function switchCat(c){cCat=c||null;loadData(cTF)}
 function doS(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='fg'||c==='mcap'?1:-1}renderTable()}
+
+function toggleWatchlistView(){showWatchlist=!showWatchlist;cCat=null;applyAll();renderCatTabs()}
+
+async function toggleFav(sym,ev){
+  ev?.stopPropagation();
+  if(FAVS.includes(sym)){
+    FAVS=FAVS.filter(s=>s!==sym);
+    await fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})});
+  }else{
+    FAVS.push(sym);
+    await fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})});
+  }
+  renderTable();renderCatTabs();
+}
+
+async function toggleFavDetail(){
+  const sym=document.getElementById('detailSymbol').textContent;
+  if(FAVS.includes(sym)){FAVS=FAVS.filter(s=>s!==sym);await fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})})}
+  else{FAVS.push(sym);await fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})})}
+  document.getElementById('detailStar').className='star '+(FAVS.includes(sym)?'active':'');
+  document.getElementById('detailStar').textContent=FAVS.includes(sym)?'★':'☆';
+  renderTable();renderCatTabs();
+}
+
+// ─── Symbol Detail Modal ────────────────────────────────────────────────────
+
+let detailPriceChart=null,detailFGChart=null;
+
+async function openDetail(sym){
+  document.getElementById('detailBackdrop').classList.add('open');
+  document.getElementById('detailSymbol').textContent=sym;
+  document.getElementById('detailPrice').textContent='Loading...';
+  document.getElementById('detailStar').className='star '+(FAVS.includes(sym)?'active':'');
+  document.getElementById('detailStar').textContent=FAVS.includes(sym)?'★':'☆';
+
+  const r=await fetch('/api/history/'+encodeURIComponent(sym));
+  const d2=await r.json();
+  if(d2.error){document.getElementById('detailPrice').textContent=d2.error;return}
+
+  const cur=d2.current;
+  const fc=cur.fg<-41?'z0':cur.fg<-25?'z1':cur.fg<-10?'z2':cur.fg<-5?'z2b':cur.fg<5?'z3':cur.fg<10?'z4':cur.fg<41?'z5':cur.fg<73?'z6':'z7';
+  document.getElementById('detailFG').className='fg-b '+fc;
+  document.getElementById('detailFG').textContent=(cur.fg>0?'+':'')+cur.fg.toFixed(1)+' '+cur.zone;
+  document.getElementById('detailPrice').textContent='$'+cur.price.toFixed(cur.price>=1?2:6);
+
+  // Price chart
+  const labels=d2.ohlcv.map(b=>new Date(b.t).toLocaleDateString());
+  const prices=d2.ohlcv.map(b=>b.c);
+
+  if(detailPriceChart)detailPriceChart.destroy();
+  const pCtx=document.getElementById('detailPriceChart');
+  detailPriceChart=new Chart(pCtx,{
+    type:'line',
+    data:{labels,datasets:[{data:prices,borderColor:'#f0b90b',borderWidth:1.5,pointRadius:0,fill:false}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},tooltip:{mode:'index',intersect:false}},
+      scales:{x:{display:false},y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c',callback:v=>'$'+v.toFixed(prices[0]>=1?2:4)}}}}
+  });
+
+  // F&G chart with colored segments
+  const fgVals=d2.fg.map(f=>f.v);
+  const fgLabels=d2.fg.map(f=>new Date(f.t).toLocaleDateString());
+  // Color each point
+  const fgColors=fgVals.map(v=>v<-10?'#0ecb81':v<-5?'#65a095':v<5?'#A19F8F':v<10?'#c8b86a':v<25?'#ff9800':'#f6465d');
+
+  if(detailFGChart)detailFGChart.destroy();
+  const fCtx=document.getElementById('detailFGChart');
+  detailFGChart=new Chart(fCtx,{
+    type:'line',
+    data:{labels:fgLabels,datasets:[{data:fgVals,borderColor:ctx=>{const i=ctx.p0DataIndex;return fgColors[i]||'#848e9c'},
+      segment:{borderColor:ctx=>fgColors[ctx.p0DataIndex]||'#848e9c'},
+      borderWidth:2,pointRadius:0,fill:false}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},
+      tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'F&G: '+(ctx.raw>0?'+':'')+ctx.raw.toFixed(1)}}},
+      scales:{x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:10}}},
+        y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c'}}}}
+  });
+}
+
+function closeDetail(){document.getElementById('detailBackdrop').classList.remove('open')}
 
 async function addToken(){
   const input=document.getElementById('addTokenInput').value.trim();
@@ -559,7 +699,7 @@ async function discoverDex(){
 }
 
 window.addEventListener('resize',()=>{if(D)renderScatter()});
-loadData('D');
+loadFavs().then(()=>loadData('D'));
 </script>
 </body>
 </html>

@@ -2,12 +2,14 @@
  * F&G Dashboard Web Server — localhost:3000
  */
 import express from 'express';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { loadCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
 import { addToken, discoverTokens, loadDexTokens } from '../core/dex_universe.js';
+import { computeTimeSeries } from '../core/fg_backtest.js';
+import { fetchOhlcv } from '../core/unified_data.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -87,6 +89,53 @@ app.post('/api/add-token', async (req, res) => {
 app.get('/api/discover', async (req, res) => {
   try { res.json(await discoverTokens()); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── History endpoint: OHLCV + F&G time series ─────────────────────────────
+
+app.get('/api/history/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const data = await fetchOhlcv(sym, 200);
+    if (!data || data.bars.length < 50) return res.json({ error: 'No data for ' + sym });
+    const series = computeTimeSeries(data.bars);
+    // Align: each series entry has a date + fg_score; match to bars by index offset
+    const offset = data.bars.length - series.length; // series starts 144 bars in
+    const ohlcv = data.bars.slice(-series.length).map((b, i) => ({
+      t: b.time * 1000, o: Math.round(b.open * 1e6) / 1e6, h: Math.round(b.high * 1e6) / 1e6,
+      l: Math.round(b.low * 1e6) / 1e6, c: Math.round(b.close * 1e6) / 1e6,
+    }));
+    const fg = series.map(s => ({ t: new Date(s.date).getTime(), v: s.fg_score }));
+    const last = series[series.length - 1];
+    res.json({ symbol: sym, source: data.source, bars: ohlcv.length, ohlcv, fg, current: { fg: last?.fg_score, zone: last?.zone, price: ohlcv[ohlcv.length - 1]?.c } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Watchlist endpoints ────────────────────────────────────────────────────
+
+const FAV_FILE = join(HOME, '.tradingview-mcp', 'watchlist', 'favorites.json');
+
+function loadFavorites() {
+  try { return JSON.parse(readFileSync(FAV_FILE, 'utf8')); } catch { return []; }
+}
+function saveFavorites(list) {
+  const dir = join(HOME, '.tradingview-mcp', 'watchlist');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(FAV_FILE, JSON.stringify(list));
+}
+
+app.get('/api/watchlist', (req, res) => { res.json(loadFavorites()); });
+app.post('/api/watchlist/add', (req, res) => {
+  const sym = req.body.symbol; if (!sym) return res.json({ error: 'No symbol' });
+  const favs = loadFavorites();
+  if (!favs.includes(sym)) { favs.push(sym); saveFavorites(favs); }
+  res.json({ success: true, favorites: favs });
+});
+app.post('/api/watchlist/remove', (req, res) => {
+  const sym = req.body.symbol; if (!sym) return res.json({ error: 'No symbol' });
+  const favs = loadFavorites().filter(s => s !== sym);
+  saveFavorites(favs);
+  res.json({ success: true, favorites: favs });
 });
 
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
