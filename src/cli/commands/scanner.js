@@ -10,6 +10,7 @@ import * as backtest from '../../core/fg_backtest.js';
 import * as production from '../../core/fg_production.js';
 import * as prodMTF from '../../core/fg_production_mtf.js';
 import * as tracker from '../../core/fg_tracker.js';
+import * as dashboard from '../../core/fg_dashboard.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -274,6 +275,23 @@ register('scan', {
     ['watch', {
       description: 'Show symbols approaching fear threshold (within 5 points of rare fear)',
       handler: () => production.watchList(),
+    }],
+    ['dashboard', {
+      description: 'CoinMarketCap-style F&G dashboard with categories, market heat, and filters',
+      options: {
+        category: { type: 'string', short: 'c', description: 'Filter: US_LARGE_CAP, ASX_MINING_MICRO, CRYPTO_MAJOR, etc' },
+        sort: { type: 'string', short: 's', description: 'Sort: fg_daily, symbol, category' },
+        'fear-only': { type: 'boolean', description: 'Only show fear signals' },
+        'extreme-only': { type: 'boolean', description: 'Only show extreme fear/greed' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 100)' },
+      },
+      handler: (opts) => dashboard.dashboard({
+        category: opts.category,
+        sort: opts.sort || 'fg_daily',
+        fear_only: opts['fear-only'] || false,
+        extreme_only: opts['extreme-only'] || false,
+        top: opts.top ? Number(opts.top) : 100,
+      }),
     }],
     ['track', {
       description: 'Show live P&L on all tracked signals',
