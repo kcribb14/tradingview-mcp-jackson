@@ -20,8 +20,16 @@ import { classifyZone } from './fg_scanner.js';
 const CACHE_DIR = join(homedir(), '.tradingview-mcp', 'cache');
 const SCORES_FILE = join(CACHE_DIR, 'fg_scores.json');
 const GLOBALS_FILE = join(CACHE_DIR, 'fg_globals.json');
-const MAX_SYMBOLS = 1000;
+const MAX_ENTRIES = 5000; // symbols × timeframes
 const EXPIRE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Build a cache key for symbol + timeframe.
+ * e.g., "AAPL:D", "AAPL:60", "AAPL:240", "AAPL:15"
+ */
+export function cacheKey(symbol, tf = 'D') {
+  return `${symbol}:${tf}`;
+}
 
 // ─── EMA / RMA math ────────────────────────────────────────────────────────
 
@@ -298,9 +306,9 @@ export function pruneCache(cache) {
     return (now - new Date(v.lastScanTime).getTime()) < EXPIRE_MS;
   });
 
-  // Sort by lastScanTime desc, keep only MAX_SYMBOLS
+  // Sort by lastScanTime desc, keep only MAX_ENTRIES
   valid.sort((a, b) => new Date(b[1].lastScanTime) - new Date(a[1].lastScanTime));
-  const pruned = valid.slice(0, MAX_SYMBOLS);
+  const pruned = valid.slice(0, MAX_ENTRIES);
 
   const result = {};
   for (const [k, v] of pruned) result[k] = v;

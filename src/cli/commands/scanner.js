@@ -3,6 +3,7 @@ import * as scanner from '../../core/scanner.js';
 import * as fgScanner from '../../core/fg_scanner.js';
 import * as fgFast from '../../core/fg_fast_scanner.js';
 import * as fgExact from '../../core/fg_exact_scanner.js';
+import * as fgMtf from '../../core/fg_mtf.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -127,6 +128,34 @@ register('scan', {
     ['cache-update', {
       description: 'Daily incremental update: fetch latest bar for all cached symbols, update EMA',
       handler: () => fgExact.updateCache(),
+    }],
+    ['mtf', {
+      description: 'Multi-timeframe F&G scan: 15m, 1H, 4H, Daily — detects capitulation, reversals, pullbacks',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 50)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
+      },
+      handler: (opts, positionals) => {
+        const symbols = positionals.length > 0 ? positionals : undefined;
+        return fgMtf.mtfScan({
+          universe: opts.universe ? Number(opts.universe) : 50,
+          top: opts.top ? Number(opts.top) : 20,
+          symbols,
+        });
+      },
+    }],
+    ['mtf-warm', {
+      description: 'Warm MTF cache: fetch 15m, 1H, 4H, Daily bars for all symbols via Yahoo',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Stocks to warm (default 50)' },
+      },
+      handler: (opts, positionals) => {
+        const symbols = positionals.length > 0 ? positionals : undefined;
+        return fgMtf.warmMTF({
+          universe: opts.universe ? Number(opts.universe) : 50,
+          symbols,
+        });
+      },
     }],
     ['parse', {
       description: 'Parse a TradingView value string to number',
