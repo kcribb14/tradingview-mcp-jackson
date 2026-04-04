@@ -71,4 +71,17 @@ export function registerScreenerTools(server) {
     try { return jsonResult(await core.exportData()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('screener_set_market', 'Switch the screener type (stock/crypto/forex/etf/bond) and/or market (country: us, asx, uk, japan, world, etc.). Use this to scan different markets.', {
+    type: z.string().optional().describe('Screener type: "stock", "crypto", "etf", "bond", "cex", "dex"'),
+    market: z.string().optional().describe('Market/country: "us", "asx", "australia", "uk", "canada", "japan", "india", "world", "germany", etc.'),
+  }, async ({ type, market }) => {
+    try { return jsonResult(await core.setMarket({ type, market })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('screener_get_market', 'Get the current screener type and market.', {}, async () => {
+    try { return jsonResult(await core.getMarket()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

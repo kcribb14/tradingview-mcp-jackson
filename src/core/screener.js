@@ -171,13 +171,14 @@ export async function read({ max_rows = 100, view } = {}) {
     })()
   `;
 
-  // Read from screener target first (always accurate after sort/filter operations).
-  // Falls back to chart page DOM if screener target isn't available.
+  // Read from chart page first (always reflects current market/type selection).
+  // Falls back to screener's own CDP target if chart page table isn't found.
   let data;
   try {
-    data = await evalInScreener(readExpr);
-  } catch {
     data = await evaluate(readExpr);
+    if (data?.error) throw new Error(data.error);
+  } catch {
+    data = await evalInScreener(readExpr);
   }
 
   if (data?.error) throw new Error(data.error);
@@ -651,4 +652,271 @@ export async function getFilters() {
  */
 export async function exportData() {
   return read({ max_rows: 500 });
+}
+
+// ─── Screener type aliases ──────────────────────────────────────────────────
+
+const SCREENER_TYPE_MAP = {
+  'stock': 'Stock Screener',
+  'stocks': 'Stock Screener',
+  'etf': 'ETF Screener',
+  'bond': 'Bond Screener',
+  'bonds': 'Bond Screener',
+  'crypto': 'Crypto Coins Screener',
+  'cryptocurrency': 'Crypto Coins Screener',
+  'coins': 'Crypto Coins Screener',
+  'cex': 'CEX Screener',
+  'dex': 'DEX Screener',
+};
+
+// ─── Market/country aliases ─────────────────────────────────────────────────
+
+const MARKET_ALIAS_MAP = {
+  'us': 'USA', 'usa': 'USA', 'united states': 'USA', 'america': 'USA',
+  'asx': 'Australia', 'au': 'Australia', 'australia': 'Australia',
+  'uk': 'United Kingdom', 'gb': 'United Kingdom', 'united kingdom': 'United Kingdom',
+  'ca': 'Canada', 'canada': 'Canada', 'tsx': 'Canada',
+  'de': 'Germany', 'germany': 'Germany',
+  'jp': 'Japan', 'japan': 'Japan',
+  'in': 'India', 'india': 'India', 'nse': 'India',
+  'hk': 'Hong Kong, China', 'hong kong': 'Hong Kong, China',
+  'cn': 'Mainland China', 'china': 'Mainland China',
+  'kr': 'South Korea', 'south korea': 'South Korea',
+  'sg': 'Singapore', 'singapore': 'Singapore',
+  'br': 'Brazil', 'brazil': 'Brazil',
+  'fr': 'France', 'france': 'France',
+  'it': 'Italy', 'italy': 'Italy',
+  'es': 'Spain', 'spain': 'Spain',
+  'mx': 'Mexico', 'mexico': 'Mexico',
+  'nz': 'New Zealand', 'new zealand': 'New Zealand',
+  'tw': 'Taiwan, China', 'taiwan': 'Taiwan, China',
+  'za': 'South Africa', 'south africa': 'South Africa',
+  'world': 'Entire world', 'all': 'Entire world', 'global': 'Entire world',
+};
+
+/**
+ * CDP mouse click at specific coordinates.
+ * React components in TradingView require proper CDP mouse events —
+ * DOM .click() doesn't trigger React's synthetic event system reliably.
+ */
+async function cdpClick(x, y) {
+  const c = await getClient();
+  await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+}
+
+/**
+ * Switch the screener type (Stock, Crypto, Forex, ETF, Bond, etc.)
+ * and/or the market (country) within the Stock Screener.
+ *
+ * @param {object} opts
+ * @param {string} [opts.type] - Screener type: "stock", "crypto", "forex", "etf", "bond", "cex", "dex"
+ * @param {string} [opts.market] - Market/country: "us", "asx", "australia", "uk", "crypto", "world", etc.
+ */
+export async function setMarket({ type, market } = {}) {
+  const result = {};
+
+  // ── Step 1: Switch screener type if requested ──────────────────────────
+
+  if (type) {
+    const typeLower = type.toLowerCase().trim();
+    const targetType = SCREENER_TYPE_MAP[typeLower];
+    if (!targetType) {
+      throw new Error(`Unknown screener type: "${type}". Valid: ${Object.keys(SCREENER_TYPE_MAP).join(', ')}`);
+    }
+
+    // Read current screener type and get button coords
+    const typeInfo = await evaluate(`
+      (function() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].className.includes('textButton') && btns[i].textContent.trim().includes('Screener')) {
+            var r = btns[i].getBoundingClientRect();
+            return { text: btns[i].textContent.trim(), x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+          }
+        }
+        return null;
+      })()
+    `);
+
+    if (!typeInfo) throw new Error('Screener type button not found');
+
+    if (typeInfo.text === targetType) {
+      result.screener_type = { action: 'already_selected', type: targetType };
+    } else {
+      // CDP click to open the screener type dropdown
+      await cdpClick(typeInfo.x, typeInfo.y);
+      await new Promise(r => setTimeout(r, 600));
+
+      // Find the target type item and get its coords
+      const itemCoords = await evaluate(`
+        (function() {
+          var target = ${JSON.stringify(targetType)};
+          var items = document.querySelectorAll('[class*="button-HZXWyU6m"]');
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].textContent.trim() === target) {
+              var r = items[i].getBoundingClientRect();
+              return { text: target, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+            }
+          }
+          var available = [];
+          items.forEach(function(it) { available.push(it.textContent.trim()); });
+          return { error: 'Type not found: ' + target, available: available };
+        })()
+      `);
+
+      if (itemCoords?.error) {
+        const c = await getClient();
+        await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape' });
+        await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+        throw new Error(itemCoords.error + (itemCoords.available ? '. Available: ' + itemCoords.available.join(', ') : ''));
+      }
+
+      // CDP click the target type
+      await cdpClick(itemCoords.x, itemCoords.y);
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Handle "Save changes?" dialog that appears when switching screener types
+      const saveDialog = await evaluate(`
+        (function() {
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            var txt = btns[i].textContent.trim();
+            if (txt.includes("Don") && txt.includes("save")) {
+              var r = btns[i].getBoundingClientRect();
+              return { x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+            }
+          }
+          return null;
+        })()
+      `);
+      if (saveDialog) {
+        await cdpClick(saveDialog.x, saveDialog.y);
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      result.screener_type = { action: 'switched', from: typeInfo.text, to: targetType };
+    }
+  }
+
+  // ── Step 2: Switch market/country if requested ─────────────────────────
+
+  if (market) {
+    const marketLower = market.toLowerCase().trim();
+    const targetMarket = MARKET_ALIAS_MAP[marketLower] || market;
+
+    // Get the market pill coordinates
+    const pillInfo = await evaluate(`
+      (function() {
+        var pill = document.querySelector('[data-qa-id="screener-pills-market-pill"]');
+        if (!pill) return null;
+        var r = pill.getBoundingClientRect();
+        return { text: pill.textContent.trim(), x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+      })()
+    `);
+
+    if (!pillInfo) {
+      throw new Error('Market pill not found. This screener type may not support market selection.');
+    }
+
+    // CDP click to open the market listbox
+    await cdpClick(pillInfo.x, pillInfo.y);
+    await new Promise(r => setTimeout(r, 800));
+
+    // Find the target market option and get its coords
+    const optCoords = await evaluate(`
+      (function() {
+        var target = ${JSON.stringify(targetMarket)};
+        var listbox = document.querySelector('[role="listbox"]');
+        if (!listbox) return { error: 'Market listbox not found' };
+
+        var options = listbox.querySelectorAll('[role="option"]');
+        var found = null;
+        var available = [];
+        for (var i = 0; i < options.length; i++) {
+          var txt = options[i].textContent.trim();
+          available.push(txt);
+          if (txt === target || txt.toLowerCase() === target.toLowerCase()) {
+            found = options[i]; break;
+          }
+        }
+
+        if (!found) {
+          for (var j = 0; j < options.length; j++) {
+            if (options[j].textContent.trim().toLowerCase().includes(target.toLowerCase())) {
+              found = options[j]; break;
+            }
+          }
+        }
+
+        if (!found) return { error: 'Market not found: ' + target, available: available.slice(0, 20) };
+
+        var r = found.getBoundingClientRect();
+        // Scroll option into view if needed
+        if (r.top < 0 || r.bottom > window.innerHeight) {
+          found.scrollIntoView({ block: 'center' });
+          r = found.getBoundingClientRect();
+        }
+        return { text: found.textContent.trim(), x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+      })()
+    `);
+
+    if (optCoords?.error) {
+      const c = await getClient();
+      await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape' });
+      await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
+      throw new Error(optCoords.error + (optCoords.available ? '. Available: ' + optCoords.available.join(', ') : ''));
+    }
+
+    // CDP click the target market
+    await cdpClick(optCoords.x, optCoords.y);
+    await new Promise(r => setTimeout(r, 2000));
+    result.market = { action: 'switched', from: pillInfo.text, to: optCoords.text };
+  }
+
+  // ── Step 3: Report current state ───────────────────────────────────────
+
+  const currentState = await evaluate(`
+    (function() {
+      var typeBtn = null;
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].className.includes('textButton') && btns[i].textContent.trim().includes('Screener')) {
+          typeBtn = btns[i].textContent.trim(); break;
+        }
+      }
+      var marketPill = document.querySelector('[data-qa-id="screener-pills-market-pill"]');
+      return {
+        screener_type: typeBtn,
+        market: marketPill ? marketPill.textContent.trim() : null
+      };
+    })()
+  `);
+
+  return { success: true, ...result, current: currentState };
+}
+
+/**
+ * Get the current screener type and market.
+ */
+export async function getMarket() {
+  const state = await evaluate(`
+    (function() {
+      var typeBtn = null;
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].className.includes('textButton') && btns[i].textContent.trim().includes('Screener')) {
+          typeBtn = btns[i].textContent.trim(); break;
+        }
+      }
+      var marketPill = document.querySelector('[data-qa-id="screener-pills-market-pill"]');
+      return {
+        screener_type: typeBtn,
+        market: marketPill ? marketPill.textContent.trim() : null
+      };
+    })()
+  `);
+  return { success: true, ...state };
 }

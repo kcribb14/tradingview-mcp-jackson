@@ -76,5 +76,19 @@ register('screener', {
       description: 'Export all screener data as JSON',
       handler: () => core.exportData(),
     }],
+    ['market', {
+      description: 'Switch screener type and/or market. Usage: tv screener market [market] [--type stock|crypto|forex|etf|bond]',
+      options: {
+        type: { type: 'string', short: 't', description: 'Screener type: stock, crypto, forex, etf, bond, cex, dex' },
+      },
+      handler: (opts, positionals) => {
+        const market = positionals.length > 0 ? positionals.join(' ') : undefined;
+        return core.setMarket({ type: opts.type, market });
+      },
+    }],
+    ['get-market', {
+      description: 'Get current screener type and market',
+      handler: () => core.getMarket(),
+    }],
   ]),
 });
