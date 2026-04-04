@@ -176,9 +176,26 @@ register('scan', {
       description: 'Warm cache for top N tokens by market cap',
       options: {
         universe: { type: 'string', short: 'u', description: 'Tokens to warm (default 500)' },
+        market: { type: 'string', short: 'm', description: 'Market: crypto, us, asx (default: crypto)' },
       },
       handler: (opts) => universe.warmUniverse({
         universe: opts.universe ? Number(opts.universe) : 500,
+        market: opts.market || 'crypto',
+      }),
+    }],
+    ['stocks', {
+      description: 'Scan US or ASX stocks with F&G scoring via Yahoo Finance',
+      options: {
+        market: { type: 'string', short: 'm', description: 'Market: us or asx (default: us)' },
+        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 100)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
+        sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite (default: fear)' },
+      },
+      handler: (opts) => universe.stockScan({
+        market: opts.market || 'us',
+        universe: opts.universe ? Number(opts.universe) : 100,
+        top: opts.top ? Number(opts.top) : 50,
+        sort: opts.sort || 'fear',
       }),
     }],
     ['dex', {

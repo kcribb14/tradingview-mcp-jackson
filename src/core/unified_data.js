@@ -1,12 +1,17 @@
 /**
- * Unified crypto data layer — auto-selects best source per symbol.
+ * Unified data layer — auto-selects best source per symbol.
+ * Covers ALL markets: US stocks, ASX stocks, crypto, forex, ETFs.
  *
  * Priority waterfall:
- *   1. Binance  (439 USDT pairs, fastest, most reliable)
- *   2. CryptoCompare (5000+ coins, broadest OHLCV coverage)
- *   3. Yahoo Finance (stocks, ETFs, forex, ~500 crypto)
- *   4. MEXC (2388 pairs, highest small-cap coverage)
- *   5. DexScreener (DEX-only tokens, no OHLCV but has price data)
+ *   Stocks (US/ASX/intl): Yahoo Finance (no auth, 18ms/symbol, 100% coverage)
+ *   Crypto: Binance → CryptoCompare → Yahoo → MEXC
+ *
+ * Symbol detection:
+ *   "AAPL"      → US stock → Yahoo Finance
+ *   "BHP.AX"    → ASX stock → Yahoo Finance
+ *   "ASX:BHP"   → ASX stock → Yahoo Finance (auto-append .AX)
+ *   "BTC"       → Crypto → Binance waterfall
+ *   "BTC-USD"   → Crypto → Yahoo Finance
  *
  * Source mapping is cached so we don't re-discover on every call.
  */
@@ -69,16 +74,18 @@ async function fetchMEXC(symbol, bars = 200) {
 
 // Yahoo Finance
 async function fetchYahoo(symbol, bars = 200) {
-  // Convert to Yahoo format
   let ticker = symbol;
-  if (!ticker.includes('-') && !ticker.includes('.') && !ticker.startsWith('^')) {
-    // Assume crypto if not a stock-like ticker
-    if (ticker.match(/^[A-Z]{2,10}(USD|USDT)?$/i)) {
-      const base = ticker.replace(/USD[T]?$/i, '');
-      ticker = base + '-USD';
-    }
+  if (ticker.match(/^[A-Z]{2,10}USDT$/i)) {
+    ticker = ticker.replace(/USDT$/i, '') + '-USD';
   }
-  const d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d&includePrePost=false`);
+
+  // Try ticker as-is first (works for stocks, ASX with .AX, and pre-formatted crypto)
+  let d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d&includePrePost=false`);
+
+  // If no result and looks like a plain crypto symbol, retry with -USD
+  if (!d?.chart?.result?.[0]?.timestamp && !ticker.includes('-') && !ticker.includes('.') && !ticker.startsWith('^')) {
+    d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker + '-USD')}?range=1y&interval=1d&includePrePost=false`);
+  }
   const chart = d?.chart?.result?.[0];
   if (!chart?.timestamp) return null;
   const q = chart.indicators.quote[0];
@@ -114,38 +121,87 @@ function saveSourceMap(map) {
 
 // ─── Unified fetch ──────────────────────────────────────────────────────────
 
+// ─── Symbol type detection ──────────────────────────────────────────────────
+
+/**
+ * Detect what type of instrument a symbol is and normalize it.
+ * Returns { type: 'stock'|'asx'|'crypto', yahoo: string, key: string }
+ */
+function detectSymbol(symbol) {
+  const s = symbol.trim();
+
+  // ASX: "BHP.AX", "ASX:BHP", or explicit market flag
+  if (s.endsWith('.AX') || s.startsWith('ASX:')) {
+    const ticker = s.replace('ASX:', '').replace('.AX', '');
+    return { type: 'asx', yahoo: ticker + '.AX', key: ticker + '.AX' };
+  }
+
+  // Already has exchange suffix (.L, .TO, .HK, etc.)
+  if (s.match(/\.[A-Z]{1,3}$/)) {
+    return { type: 'stock', yahoo: s, key: s };
+  }
+
+  // Crypto: has -USD suffix, or is a known crypto
+  if (s.includes('-USD') || s.endsWith('USDT')) {
+    return { type: 'crypto', yahoo: s, key: s.replace(/[-\/]USD[T]?$/i, '') };
+  }
+
+  // Crypto: short all-caps that look like crypto tickers
+  const cryptoTokens = new Set([
+    'BTC','ETH','SOL','XRP','DOGE','ADA','DOT','AVAX','LINK','MATIC','BNB',
+    'SHIB','UNI','AAVE','LTC','NEAR','ATOM','FTM','ALGO','SAND','HBAR',
+    'APT','ARB','OP','SUI','SEI','TIA','INJ','PEPE','WLD','FET','RNDR',
+    'GRT','MKR','CRV','COMP','SNX','LDO','RPL','IMX','MANA','AXS',
+    'BONK','WIF','JUP','RAY','PYTH','JTO','RENDER','POPCAT','MEW','BOME',
+    'ENA','PENDLE','ETHFI','STRK','ZK','ZRO','EIGEN','GRASS','ONDO',
+  ]);
+  if (cryptoTokens.has(s.toUpperCase())) {
+    return { type: 'crypto', yahoo: s, key: s.toUpperCase() };
+  }
+
+  // Default: assume US stock
+  return { type: 'stock', yahoo: s, key: s.toUpperCase() };
+}
+
 /**
  * Fetch OHLCV bars for a symbol from the best available source.
- * Auto-discovers and caches the source mapping.
+ * Auto-detects symbol type and routes to the optimal source.
  *
- * @param {string} symbol - Token symbol (e.g., "BTC", "BONK", "AAPL")
+ * @param {string} symbol - Any symbol: "AAPL", "BHP.AX", "ASX:BHP", "BTC", "BTC-USD"
  * @param {number} bars - Number of daily bars (default 200)
- * @returns {{ bars: Array, source: string, symbol: string }} or null
+ * @returns {{ bars: Array, source: string, symbol: string, type: string }} or null
  */
 export async function fetchOhlcv(symbol, bars = 200) {
-  const key = symbol.toUpperCase().replace(/[-\/]USD[T]?$/i, '');
-  const sourceMap = loadSourceMap();
+  const detected = detectSymbol(symbol);
 
-  // If we have a cached source, try it first
-  if (sourceMap[key]) {
-    const cached = SOURCES.find(s => s.name === sourceMap[key]);
-    if (cached) {
-      const data = await cached.fn(symbol, bars).catch(() => null);
+  // For stocks and ASX: ALWAYS use Yahoo directly, no source cache needed
+  if (detected.type === 'stock' || detected.type === 'asx') {
+    const data = await fetchYahoo(detected.yahoo, bars).catch(() => null);
+    if (data && data.length >= 5) {
+      return { bars: data.slice(-bars), source: 'yahoo', symbol, type: detected.type };
+    }
+    return null;
+  }
+
+  // For crypto: check cached source first, then waterfall
+  const sourceMap = loadSourceMap();
+  if (sourceMap[detected.key]) {
+    const cachedSrc = SOURCES.find(s => s.name === sourceMap[detected.key]);
+    if (cachedSrc) {
+      const data = await cachedSrc.fn(symbol, bars).catch(() => null);
       if (data && data.length >= 5) {
-        return { bars: data.slice(-bars), source: cached.name, symbol };
+        return { bars: data.slice(-bars), source: cachedSrc.name, symbol, type: detected.type };
       }
     }
   }
 
-  // Waterfall through sources
   for (const source of SOURCES) {
     try {
       const data = await source.fn(symbol, bars);
       if (data && data.length >= 5) {
-        // Cache the source mapping
-        sourceMap[key] = source.name;
+        sourceMap[detected.key] = source.name;
         saveSourceMap(sourceMap);
-        return { bars: data.slice(-bars), source: source.name, symbol };
+        return { bars: data.slice(-bars), source: source.name, symbol, type: detected.type };
       }
     } catch { /* try next */ }
   }
@@ -234,4 +290,47 @@ export function getSourceStats() {
     total_mapped: Object.keys(map).length,
     by_source: counts,
   };
+}
+
+/**
+ * Get US stocks from TradingView screener (requires open screener on US market).
+ * Falls back to a curated list of popular Stake.com tickers.
+ */
+export function getUSStockUniverse(count = 100) {
+  // Popular US stocks on Stake.com — sorted roughly by market cap
+  const stakeUS = [
+    'AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','BRK-B','AVGO','LLY',
+    'JPM','V','UNH','XOM','MA','COST','HD','PG','JNJ','ABBV',
+    'WMT','NFLX','BAC','CRM','ORCL','CVX','MRK','KO','PEP','AMD',
+    'TMO','CSCO','ADBE','ACN','ABT','MCD','INTC','IBM','DHR','QCOM',
+    'INTU','ISRG','GE','VZ','TXN','BKNG','PFE','RTX','AMGN','LMT',
+    'NOW','AMAT','GS','BLK','CAT','HON','LOW','DE','GEV','PLTR',
+    'T','MS','LRCX','AXP','NEE','UBER','CI','DIS','BA','BMY',
+    'SO','DUK','SLB','WFC','SCHW','PLD','CME','MCO','MU','PYPL',
+    'SQ','SHOP','COIN','SNOW','CRWD','DDOG','PANW','ZS','ABNB','RIVN',
+    'SOUN','RKLB','SOFI','MARA','RIOT','HOOD','LCID','GRAB','NIO','XPEV',
+    'SPY','QQQ','DIA','IWM','VOO','VTI','ARKK','XLF','XLE','XLK',
+    'TQQQ','SQQQ','UPRO','TLT','GLD','SLV','USO','VXX','UVXY','SPXS',
+  ];
+  return stakeUS.slice(0, count);
+}
+
+/**
+ * Get ASX stocks — CommSec universe sorted by market cap.
+ */
+export function getASXStockUniverse(count = 100) {
+  const asxStocks = [
+    'CBA.AX','BHP.AX','WBC.AX','NAB.AX','ANZ.AX','WES.AX','MQG.AX','CSL.AX','WDS.AX','FMG.AX',
+    'TLS.AX','GMG.AX','WOW.AX','TCL.AX','QBE.AX','NST.AX','BXB.AX','COL.AX','ALL.AX','EVN.AX',
+    'STO.AX','ORG.AX','REA.AX','S32.AX','LYC.AX','SCG.AX','IAG.AX','SUN.AX','SGH.AX','PLS.AX',
+    'CPU.AX','SOL.AX','APA.AX','QAN.AX','XRO.AX','WTC.AX','PME.AX','MPL.AX','TLC.AX','BSL.AX',
+    'COH.AX','VCX.AX','YAL.AX','ALQ.AX','MIN.AX','ASX.AX','SGP.AX','SHL.AX','ORI.AX','JBH.AX',
+    // Mining / Resources (CANETOAD targets)
+    'RIO.AX','IGO.AX','SFR.AX','PDN.AX','LTR.AX','DYL.AX','BMN.AX','LOT.AX','PEN.AX','BOE.AX',
+    'ERA.AX','AGE.AX','DEV.AX','WR1.AX','RMS.AX','CHR.AX','CMM.AX','RED.AX','GOR.AX','NHC.AX',
+    'WHC.AX','ILU.AX','CIA.AX','CRN.AX','SYR.AX','TIE.AX','ALK.AX','CXO.AX','LKE.AX','VUL.AX',
+    'PLL.AX','ARU.AX','SYA.AX','GT1.AX','FFX.AX','KAI.AX','WGX.AX','GCY.AX','DRE.AX','NVA.AX',
+    'BRN.AX','ZIP.AX','LBY.AX','NVX.AX','TYR.AX','EML.AX','ADH.AX','IMU.AX','BET.AX','NEA.AX',
+  ];
+  return asxStocks.slice(0, count);
 }

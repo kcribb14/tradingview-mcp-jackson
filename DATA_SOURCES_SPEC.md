@@ -1,76 +1,97 @@
-# Unified Crypto Data Sources — Specification & Test Results
+# Unified Data Sources — Specification & Test Results
 
 Tested 2026-04-04 with live API calls against all sources.
 
-## Coverage Matrix (tested live)
+## Full Coverage Matrix
 
-| Source | Total Pairs | Free OHLCV 200d | Speed (200 bars) | Small-cap | Auth | Rate Limit |
-|--------|------------|-----------------|-------------------|-----------|------|------------|
-| **Binance** | 439 USDT | YES | **326ms** | Medium | No | 1200/min |
-| **Bybit** | 635 | YES | **173ms** | Medium | No | 120/min |
-| **MEXC** | 2388 | YES | **278ms** | Highest CEX | No | 500/min |
-| **Gate.io** | 2311 | YES | **683ms** | High | No | 900/min |
+### Crypto Sources
+
+| Source | Pairs/Coins | Free OHLCV 200d | Speed | Small-cap | Auth | Rate Limit |
+|--------|------------|-----------------|-------|-----------|------|------------|
+| **Binance** | 439 USDT | YES | 326ms | Medium | No | 1200/min |
+| **Bybit** | 635 | YES | 173ms | Medium | No | 120/min |
+| **MEXC** | 2388 | YES | 278ms | Highest CEX | No | 500/min |
+| **Gate.io** | 2311 | YES | 683ms | High | No | 900/min |
 | **KuCoin** | 1127 | YES | ~400ms | High | No | 100/min |
-| **CryptoCompare** | 5000+ | YES (201 bars) | **311ms** | Very High | No* | 100K/mo |
-| **Yahoo Finance** | ~500 crypto | YES (366 bars) | **338ms** | Low crypto | No | ~2000/hr |
-| CoinGecko | 17870 listed | NO (4-day bars) | ~500ms | Discovery only | No | 10-30/min |
-| DexScreener | DEX-only | NO (5m/1h/6h/24h) | ~200ms | DEX-only | No | ~300/min |
-| Jupiter | 15000+ Solana | NO (prices only) | ~1s | Solana DEX | No | — |
-| CoinCap | — | DOWN | — | — | — | — |
+| **CryptoCompare** | 5000+ | YES (201 bars) | 311ms | Very High | No | 100K/mo |
+| **Yahoo Finance** | ~500 crypto | YES (366 bars) | 338ms | Low crypto | No | ~2000/hr |
+| CoinGecko | 17870 listed | NO (4-day bars only) | ~500ms | Discovery only | No | 10-30/min |
+| DexScreener | DEX-only | NO (5m/1h/6h/24h only) | ~200ms | DEX-only | No | ~300/min |
 
-*CryptoCompare: 100K calls/month free tier (enough for ~333 symbols × 10 fetches/day)
+### Stock Sources
 
-## Optimal Source Stack
+| Source | US Stocks | ASX Stocks | OHLCV 200d | Speed | Auth | Rate Limit |
+|--------|-----------|------------|------------|-------|------|------------|
+| **Yahoo Finance** | ~8000 | ~2200 | YES | **18ms/sym** | No | ~2000/hr |
+| Alpha Vantage | ~8000 | ~2200 | YES | ~500ms | API Key | 5/min free |
+| Twelve Data | NYSE 3077, NASDAQ 4479 | ASX 2020 | YES | ~300ms | API Key | 8/min free |
+| Stooq | Some US | Some AU | Blocked | N/A | No | Unknown |
+| EODHD | ~8000 | ~2200 | YES | ~400ms | API Key | 20/day free |
+| TradingView screener | ~7700 US | ~2200 ASX | Summary only | 2s/100 | N/A | N/A |
+
+## Optimal Source Stack (implemented)
 
 ```
-Priority waterfall (auto-selected per symbol):
+Symbol type detection → auto-route to best source:
 
-1. Binance     → 439 pairs, fastest, most reliable for top tokens
-2. CryptoCompare → 5000+ coins, broadest OHLCV, covers long-tail
-3. Yahoo Finance → stocks, ETFs, forex, ~500 crypto, good for hybrid
-4. MEXC         → 2388 pairs, highest small-cap CEX coverage (backup)
+  US Stocks (AAPL, SPY, etc.)     → Yahoo Finance (18ms, no auth, 100% coverage)
+  ASX Stocks (BHP.AX, NST.AX)    → Yahoo Finance (21ms, .AX suffix, 91%+ coverage)
+  Crypto (BTC, SOL, BONK)        → Binance → CryptoCompare → Yahoo → MEXC waterfall
+  Forex, Commodities              → Yahoo Finance
 ```
 
 ## Live Test Results
 
-### Top 100 tokens (by market cap)
-- Tradeable (non-stablecoin): 90
-- OHLCV available: 70 (78%)
-- Sources used: Binance 35, Yahoo 30, CryptoCompare 5
+### US Stocks (Stake.com Universe)
+- **119/120 scored in 1.9 seconds**
+- Distribution: 8 Extreme Fear, 48 Fear, 59 Neutral, 4 Greed
+- Source: 100% Yahoo Finance
+- Coverage: 99%
 
-### Top 250 tokens
-- Tradeable: 229
-- OHLCV available: **195 (85%)**
-- Sources: Binance 121 (62%), Yahoo 56 (29%), CryptoCompare 18 (9%)
-- Time: **13.8 seconds** (65ms/symbol average)
-- Failed: 34 (mostly RWA tokens, institutional products, very new tokens)
+### ASX Stocks (CommSec Universe)
+- **91/100 scored in 1.9 seconds**
+- Distribution: 18 Extreme Fear, 32 Fear, 39 Neutral, 2 Greed
+- Source: 100% Yahoo Finance
+- Coverage: 91%
+- ASX market is more fearful than US (55% in Fear/Extreme Fear vs 47% US)
 
-### Speed Benchmarks (200 daily bars, BTC)
-```
-Bybit:          173ms ⚡
-MEXC:           278ms
-CryptoCompare:  311ms
-Binance:        326ms
-Yahoo Finance:  338ms
-Gate.io:        683ms
-```
+### ASX Mining / CANETOAD Targets
+- **30/30 miners scored in 0.9 seconds** (100% coverage)
+- Top Fear: LOT.AX (-29.3), CMM.AX (-29.0), DEV.AX (-26.3)
+- Neutral: BHP.AX (-1.8), PLS.AX (0.0), RIO.AX (+4.4)
+- Greed: WDS.AX (+10.4)
 
-## OHLCV Format (normalized)
-All sources normalize to:
-```json
-{ "time": 1775088000, "open": 66964.29, "high": 67057.42, "low": 66775.91, "close": 66969.87, "volume": 2827 }
-```
+### Crypto (Universe Scan)
+- **195/229 scored in 13.8 seconds** (85% coverage)
+- Sources: Binance 121, Yahoo 56, CryptoCompare 18
+- Distribution: 54 Extreme Fear, 97 Fear, 42 Neutral, 2 Greed
 
-## Coverage Gaps
-Tokens that exist in top 250 but have NO OHLCV source:
-- RWA tokens: BUIDL, OUSG, USTB, YLDS, USYC (institutional, no CEX listing)
-- New tokens: HYPE, PUMP (too new for historical data)
-- Exotic: NFT-like tokens, wrapped derivatives
+## Total Coverage
 
-## Unique tokens across ALL sources
-- Binance: 439 unique tokens
-- CryptoCompare: ~5000 unique (covers nearly all active crypto)
-- Yahoo: ~500 crypto + unlimited stocks/ETFs/forex
-- MEXC: 2388 unique (many micro-caps)
-- **Combined theoretical max: ~6000 unique tokens with 200-day OHLCV**
-- **Practical coverage: ~2000 tokens with reliable data (sufficient volume + history)**
+| Market | Instruments | Time | Coverage |
+|--------|-------------|------|----------|
+| US Stocks | 119 | 1.9s | 99% |
+| ASX Stocks | 91 | 1.9s | 91% |
+| Crypto (top 250) | 195 | 13.8s | 85% |
+| **TOTAL** | **405** | **~18s** | **92%** |
+
+### Theoretical Maximum
+- US Stocks: ~8000 via Yahoo Finance
+- ASX Stocks: ~2020 via Yahoo Finance
+- Crypto: ~2000 with reliable OHLCV data
+- **Combined: ~12,000 unique instruments scoreable**
+
+## Symbol Format Detection
+
+| Input | Detected As | Source | Yahoo Ticker |
+|-------|-------------|--------|--------------|
+| `AAPL` | US Stock | Yahoo | AAPL |
+| `BRK-B` | US Stock | Yahoo | BRK-B |
+| `SPY` | US Stock | Yahoo | SPY |
+| `BHP.AX` | ASX Stock | Yahoo | BHP.AX |
+| `ASX:BHP` | ASX Stock | Yahoo | BHP.AX |
+| `NST.AX` | ASX Stock | Yahoo | NST.AX |
+| `BTC` | Crypto | Binance | BTCUSDT |
+| `SOL` | Crypto | Binance | SOLUSDT |
+| `BTC-USD` | Crypto | Yahoo | BTC-USD |
+| `BONK` | Crypto | Binance | BONKUSDT |

@@ -194,6 +194,133 @@ export async function universeScan({ universe = 250, top = 50, sort = 'fear' } =
 /**
  * Warm the universe cache.
  */
-export async function warmUniverse({ universe = 500 } = {}) {
-  return universeScan({ universe, top: 0, sort: 'market_cap' });
+export async function warmUniverse({ universe = 500, market = 'crypto' } = {}) {
+  if (market === 'crypto') return universeScan({ universe, top: 0, sort: 'market_cap' });
+  return stockScan({ market, universe, top: 0, sort: 'market_cap' });
+}
+
+// ─── Stock scan (US + ASX) ──────────────────────────────────────────────────
+
+/**
+ * Scan US or ASX stocks with F&G scoring.
+ *
+ * @param {string} market - 'us' or 'asx'
+ * @param {number} universe - Number of stocks (default 100)
+ * @param {number} top - Return top N (default 50)
+ * @param {string} sort - Sort: 'fear', 'greed', 'composite' (default 'fear')
+ */
+export async function stockScan({ market = 'us', universe = 100, top = 50, sort = 'fear' } = {}) {
+  const t0 = Date.now();
+
+  // Get symbol list
+  const { getUSStockUniverse, getASXStockUniverse } = await import('./unified_data.js');
+  const symbolList = market === 'asx'
+    ? getASXStockUniverse(universe)
+    : getUSStockUniverse(universe);
+
+  // Load cache + globals
+  const cache = loadCache();
+  const globals = await ensureGlobals();
+  const now = Date.now();
+
+  // Classify cached vs need-fetch
+  const cached = [];
+  const needFetch = [];
+
+  for (const sym of symbolList) {
+    const key = sym.toUpperCase() + ':D';
+    const entry = cache[key];
+    const tier = getScanTier(entry, now);
+    if (tier === 'INSTANT' && entry) {
+      cached.push({ symbol: sym, entry });
+    } else {
+      needFetch.push(sym);
+    }
+  }
+
+  // Fetch OHLCV for uncached
+  const fetchStart = Date.now();
+  let fetchedCount = 0, fetchErrors = 0;
+  const sourceCounts = {};
+
+  if (needFetch.length > 0) {
+    const batch = await fetchBatch(needFetch, 200, 20);
+
+    for (const sym of needFetch) {
+      const data = batch.results.get(sym);
+      if (data && data.bars.length >= 5) {
+        const key = sym.toUpperCase() + ':D';
+        const fg = computeFGFromBars(data.bars, cache[key]?._state || {}, globals);
+        if (fg) {
+          cache[key] = updateCacheEntry(sym, data.bars, cache[key], globals);
+          fetchedCount++;
+          sourceCounts[data.source] = (sourceCounts[data.source] || 0) + 1;
+        } else { fetchErrors++; }
+      } else { fetchErrors++; }
+    }
+
+    saveCache(pruneCache(cache));
+  }
+
+  const fetchTime = Date.now() - fetchStart;
+
+  // Build results
+  const results = [];
+  for (const sym of symbolList) {
+    const key = sym.toUpperCase() + ':D';
+    const entry = cache[key];
+    if (!entry || entry.fgScore == null) continue;
+
+    results.push({
+      symbol: sym,
+      fg_score: entry.fgScore,
+      zone: entry.zone,
+      severity: entry.severity,
+      components: entry.components,
+      rsi: entry.rsi,
+      scan_tier: cached.find(c => c.symbol === sym) ? 'INSTANT' : 'FETCHED',
+    });
+  }
+
+  // Sort
+  switch (sort) {
+    case 'greed':      results.sort((a, b) => b.fg_score - a.fg_score); break;
+    case 'composite':  results.sort((a, b) => Math.abs(b.fg_score) - Math.abs(a.fg_score)); break;
+    case 'market_cap': break; // already in market cap order
+    default:           results.sort((a, b) => a.fg_score - b.fg_score); break;
+  }
+
+  const totalTime = Date.now() - t0;
+
+  const dist = { extreme_fear: 0, fear: 0, neutral: 0, greed: 0, extreme_greed: 0 };
+  for (const r of results) {
+    if (r.severity === -2) dist.extreme_fear++;
+    else if (r.severity === -1) dist.fear++;
+    else if (r.severity === 0) dist.neutral++;
+    else if (r.severity === 1) dist.greed++;
+    else if (r.severity === 2) dist.extreme_greed++;
+  }
+
+  return {
+    success: true,
+    scan_type: 'stock',
+    market,
+    timing: {
+      fetch_ms: fetchTime,
+      total_ms: totalTime,
+      total_readable: (totalTime / 1000).toFixed(1) + 's',
+    },
+    coverage: {
+      requested: universe,
+      scored: results.length,
+      cached: cached.length,
+      fetched: fetchedCount,
+      errors: fetchErrors,
+      sources: sourceCounts,
+    },
+    results: top > 0 ? results.slice(0, top) : [],
+    fear_opportunities: results.filter(r => r.severity <= -1).slice(0, 20),
+    greed_warnings: [...results].sort((a, b) => b.fg_score - a.fg_score).filter(r => r.severity >= 1).slice(0, 10),
+    distribution: dist,
+  };
 }
