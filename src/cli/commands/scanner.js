@@ -7,6 +7,7 @@ import * as fgMtf from '../../core/fg_mtf.js';
 import * as dex from '../../core/dexscreener.js';
 import * as universe from '../../core/fg_universe.js';
 import * as backtest from '../../core/fg_backtest.js';
+import * as production from '../../core/fg_production.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -237,6 +238,23 @@ register('scan', {
         top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
       },
       handler: (opts) => dex.dexVsCexScan({ top: opts.top ? Number(opts.top) : 20 }),
+    }],
+    ['production', {
+      description: 'Production scan: validated strategies only, regime-filtered, position-limited',
+      options: {
+        us: { type: 'string', description: 'US stock count (default 500)' },
+        asx: { type: 'string', description: 'ASX stock count (default 200)' },
+        crypto: { type: 'string', description: 'Crypto count (default 50)' },
+      },
+      handler: (opts) => production.productionScan({
+        us: opts.us ? Number(opts.us) : 500,
+        asx: opts.asx ? Number(opts.asx) : 200,
+        crypto: opts.crypto ? Number(opts.crypto) : 50,
+      }),
+    }],
+    ['watch', {
+      description: 'Show symbols approaching fear threshold (within 5 points of rare fear)',
+      handler: () => production.watchList(),
     }],
     ['backtest', {
       description: 'Backtest F&G fear signals: historical win rates, timing, optimal entry strategies',
