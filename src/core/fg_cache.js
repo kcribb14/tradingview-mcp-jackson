@@ -107,8 +107,11 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   const lastClose = closes[closes.length - 1];
   const lastBar = bars[bars.length - 1];
 
-  // ── pmacd: price vs EMA(144) ──
-  // DGT uses: (close / ema144 - 1) * 100, then applies RMA smoothing
+  // ═══════════════════════════════════════════════════════════════════════
+  // DGT PINE FORMULA — exact match, no scaling, no clamping
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ── pmacd: (close / ema(close,144) - 1) * 100 ──
   let ema144 = state.ema144 ?? null;
   if (ema144 == null) {
     ema144 = calcEMA(closes, 144);
@@ -117,53 +120,43 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
       ema144 = updateEMA(ema144, c, 144);
     }
   }
-  const pmacdRaw = ema144 > 0 ? (lastClose / ema144 - 1) * 100 : 0;
-  // Scale: 1% deviation = ~3 points, no hard clamp (let extremes show)
-  const pmacd = pmacdRaw * 3;
+  const pmacd = ema144 > 0 ? (lastClose / ema144 - 1) * 100 : 0;
 
-  // ── ror: rate of return over 20 bars ──
-  const refClose = bars.length > 20 ? closes[closes.length - 21] : closes[0];
-  const rorRaw = refClose > 0 ? (lastClose - refClose) / refClose * 100 : 0;
-  const ror = rorRaw * 2;
+  // ── ror: (close - close[144]) / close[144] * 100 ──
+  // DGT uses 144-bar lookback for rate of return
+  const rorIdx = Math.max(0, closes.length - 145);
+  const refClose = closes[rorIdx];
+  const ror = refClose > 0 ? (lastClose - refClose) / refClose * 100 : 0;
 
-  // ── moneyFlow: MFI-style calculation over 14 bars ──
-  // DGT uses Money Flow Index: cumulative positive/negative flow ratio
-  const mfPeriod = Math.min(14, bars.length - 1);
-  const mfBars = bars.slice(-mfPeriod - 1);
-  let posFlow = 0, negFlow = 0;
-  for (let i = 1; i < mfBars.length; i++) {
-    const tp = (mfBars[i].high + mfBars[i].low + mfBars[i].close) / 3;
-    const prevTp = (mfBars[i-1].high + mfBars[i-1].low + mfBars[i-1].close) / 3;
-    const rawMf = tp * (mfBars[i].volume || 0);
-    if (tp > prevTp) posFlow += rawMf;
-    else if (tp < prevTp) negFlow += rawMf;
+  // ── moneyFlow: rma(mfRatio * volume, 21) / rma(volume, 21) * 100 ──
+  // mfRatio = (2*close - low - high) / (high - low)
+  const mfPeriod = 21;
+  let mfRMA = state.mfRMA ?? null;
+  let volRMA = state.volRMA ?? null;
+  const mfStart = Math.max(0, bars.length - mfPeriod);
+  for (let i = mfStart; i < bars.length; i++) {
+    const b = bars[i];
+    const range = b.high - b.low;
+    const mfRatio = range > 0 ? (2 * b.close - b.low - b.high) / range : 0;
+    const mfVal = mfRatio * (b.volume || 0);
+    mfRMA = mfRMA != null ? updateRMA(mfRMA, mfVal, mfPeriod) : mfVal;
+    volRMA = volRMA != null ? updateRMA(volRMA, b.volume || 0, mfPeriod) : (b.volume || 0);
   }
-  const mfi = negFlow > 0 ? 100 - 100 / (1 + posFlow / negFlow) : (posFlow > 0 ? 100 : 50);
-  // MFI 50 = neutral, >70 = overbought (greed), <30 = oversold (fear)
-  const moneyFlow = (mfi - 50) * 1.2;
+  const moneyFlow = volRMA > 0 ? (mfRMA / volRMA) * 100 : 0;
 
-  // ── vix: volatility proxy from ATR-style calculation ──
-  // DGT uses VIX-relative measure; we approximate with ATR/close ratio
-  const atrPeriod = Math.min(14, bars.length - 1);
-  const atrBars = bars.slice(-atrPeriod);
-  let atrSum = 0;
-  for (const b of atrBars) {
-    atrSum += (b.high - b.low);
-  }
-  const atr = atrSum / atrBars.length;
-  const atrPct = lastClose > 0 ? (atr / lastClose) * 100 : 0;
-  // ATR% of 1.5% is normal; higher = fear, lower = complacency
-  const vixProxy = -(atrPct - 1.5) * 10;
+  // ── vix: proxy — deviation of VIX from its EMA ──
+  // DGT uses request.security('VIX', ...) which we approximate from globals
+  const vixProxy = globals.vix?.deviation ?? 0;
 
-  // ── gold: from global cache ──
+  // ── gold: proxy — rate of change of gold price ──
+  // DGT uses request.security('GOLD', ...) for -(1 - close[21]/close) * 100
   const goldProxy = globals.gold ?? 0;
 
-  // ── RSI from state or bars ──
+  // ── RSI (for info display, not part of F&G composite) ──
   let rsi = state.rsi ?? null;
   let avgGain = state.avgGain ?? null;
   let avgLoss = state.avgLoss ?? null;
   if (avgGain == null || avgLoss == null) {
-    // Calculate from scratch
     let gains = 0, losses = 0;
     for (let i = 1; i < closes.length; i++) {
       const diff = closes[i] - closes[i - 1];
@@ -172,7 +165,6 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
     avgGain = gains / (closes.length - 1);
     avgLoss = losses / (closes.length - 1);
   } else {
-    // Update incrementally
     for (const c of closes) {
       if (state._lastClose != null) {
         const diff = c - state._lastClose;
@@ -184,13 +176,14 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   }
   rsi = calcRSI(avgGain, avgLoss);
 
-  // ── Composite F&G score ──
-  // DGT averages all 5 components equally, then applies RMA smoothing
-  const components = { pmacd, ror, moneyFlow, vix: vixProxy, gold: goldProxy };
-  const raw = (pmacd + ror + moneyFlow + vixProxy + goldProxy) / 5;
-  // Soft compression: linear within [-60,60], compressed beyond (no hard clamp)
-  // This preserves differentiation at extremes while keeping the scale readable
-  const fgScore = Math.round(softCompress(raw) * 100) / 100;
+  // ── Composite: weighted average → RMA(5) smoothing ──
+  // DGT weights: pmacd=1.0, ror=1.0, mf=1.0, vix=1.2, gold=0.8 → total=5.0
+  const components = { pmacd: round(pmacd), ror: round(ror), moneyFlow: round(moneyFlow), vix: round(vixProxy), gold: round(goldProxy) };
+  const raw = (pmacd * 1.0 + ror * 1.0 + moneyFlow * 1.0 + vixProxy * 1.2 + goldProxy * 0.8) / 5.0;
+  // Apply RMA(5) smoothing on composite
+  let fgRMA = state.fgRMA ?? raw;
+  fgRMA = updateRMA(fgRMA, raw, 5);
+  const fgScore = round(fgRMA);
   const { zone, severity } = classifyZone(fgScore);
 
   return {
@@ -205,32 +198,14 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
       gold: round(goldProxy),
     },
     rsi: round(rsi),
-    // State to persist for incremental updates
     _state: {
-      ema144,
-      avgGain,
-      avgLoss,
-      rsi,
-      lastClose,
-      lastBarTime: lastBar.time,
+      ema144, avgGain, avgLoss, rsi, lastClose, lastBarTime: lastBar.time,
+      mfRMA, volRMA, fgRMA, // DGT state for incremental updates
     },
   };
 }
 
 function round(v) { return v != null ? Math.round(v * 100) / 100 : null; }
-
-/**
- * Soft compression: linear within [-60, 60], logarithmically compressed beyond.
- * Maps (-∞,∞) → (~-100, ~100) while preserving full differentiation.
- */
-function softCompress(v) {
-  const limit = 60;
-  if (Math.abs(v) <= limit) return v;
-  const sign = v > 0 ? 1 : -1;
-  const excess = Math.abs(v) - limit;
-  // Log compression: 60 + 20*ln(1 + excess/20) — approaches ~100 asymptotically
-  return sign * (limit + 20 * Math.log(1 + excess / 20));
-}
 
 // ─── Cache I/O ──────────────────────────────────────────────────────────────
 

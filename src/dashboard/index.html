@@ -56,7 +56,9 @@ tbody tr:hover{background:#161b22}
 td{padding:6px 12px;white-space:nowrap}
 .sym{font-weight:600;color:#eaecef}
 .fg-b{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:600;font-size:12px;min-width:52px;text-align:center;color:#fff}
-.z0{background:#910000}.z1{background:#d32f2f}.z2{background:#e65100}.z3{background:#474d57}.z4{background:#00796b}.z5{background:#2e7d32}.z6{background:#1b5e20}
+/* DGT exact zone colors */
+.z0{background:#910000}.z1{background:#ff5252}.z2{background:#ff9800}.z2b{background:#c8b86a}
+.z3{background:#A19F8F}.z4{background:#65a095}.z5{background:#50b050}.z6{background:#2e8f2e}.z7{background:#006400}
 .sw{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
 .sw-e{background:#0ecb81;color:#181a20;animation:pulse 2s infinite}
 .sw-w{background:#f0b90b;color:#181a20}
@@ -414,7 +416,7 @@ function renderScatter(){
           title:{display:true,text:'Market Cap',color:'#848e9c'},
         },
         y:{
-          min:-100,max:100,
+          min:-60,max:90,
           grid:{color:'#1e232960'},
           ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},
           title:{display:true,text:'F&G Score ('+D.tf+')',color:'#848e9c'},
@@ -425,14 +427,15 @@ function renderScatter(){
       id:'bgZones',
       beforeDraw(ch){
         const ctx=ch.ctx;const{top,bottom,left,right}=ch.chartArea;const yS=ch.scales.y;
+        // DGT exact zone backgrounds
         const zones=[
-          [60,100,'rgba(145,0,0,0.4)'],[30,60,'rgba(145,0,0,0.25)'],[15,30,'rgba(246,70,93,0.15)'],[5,15,'rgba(246,70,93,0.06)'],
-          [-5,5,'rgba(71,77,87,0.08)'],
-          [-15,-5,'rgba(14,203,129,0.06)'],[-30,-15,'rgba(14,203,129,0.15)'],[-60,-30,'rgba(14,203,129,0.25)'],[-100,-60,'rgba(14,203,129,0.4)']
+          [73,90,'rgba(0,100,0,0.25)'],[41,73,'rgba(46,143,46,0.20)'],[10,41,'rgba(80,176,80,0.12)'],
+          [5,10,'rgba(101,160,149,0.10)'],[-5,5,'rgba(161,159,143,0.08)'],[-10,-5,'rgba(200,184,106,0.10)'],
+          [-25,-10,'rgba(255,152,0,0.12)'],[-41,-25,'rgba(255,82,82,0.18)'],[-60,-41,'rgba(145,0,0,0.25)']
         ];
         for(const[f,t,c]of zones){const y1=yS.getPixelForValue(t),y2=yS.getPixelForValue(f);ctx.fillStyle=c;ctx.fillRect(left,y1,right-left,y2-y1)}
-        ctx.fillStyle='rgba(234,236,239,0.2)';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';
-        for(const[y,txt]of[[80,'EXTREME GREED'],[45,'GREED'],[22,'WEAK GREED'],[0,'NEUTRAL'],[-22,'WEAK FEAR'],[-45,'FEAR'],[-80,'EXTREME FEAR']]){
+        ctx.fillStyle='rgba(234,236,239,0.22)';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';
+        for(const[y,txt]of[[80,'Euphoria'],[55,'Thrill'],[25,'Excitement'],[7,'Optimism'],[0,'Balanced'],[-7,'Anxiety'],[-18,'Fear'],[-33,'Panic'],[-50,'Despondency']]){
           ctx.fillText(txt,right-6,yS.getPixelForValue(y)+4);
         }
       }
@@ -440,9 +443,10 @@ function renderScatter(){
   });
 }
 
+// DGT exact zone colors
 function fgBadge(v){
   if(v==null)return'<span style="color:#5e6673">—</span>';
-  const fc=v<=-30?'z0':v<=-15?'z1':v<=-5?'z2':v<=5?'z3':v<=15?'z4':v<=30?'z5':'z6';
+  const fc=v<-41?'z0':v<-25?'z1':v<-10?'z2':v<-5?'z2b':v<5?'z3':v<10?'z4':v<41?'z5':v<73?'z6':'z7';
   return`<span class="fg-b ${fc}">${v>0?'+':''}${v.toFixed(1)}</span>`;
 }
 
@@ -473,7 +477,7 @@ function renderTable(){
 
   document.getElementById('tbody').innerHTML=page.map((r,i)=>{
     const activeFG=fgForTF(r);
-    const zn=activeFG!=null?(activeFG<=-30?'EXTREME FEAR':activeFG<=-15?'FEAR':activeFG<=-5?'WEAK FEAR':activeFG<=5?'NEUTRAL':activeFG<=15?'WEAK GREED':activeFG<=30?'GREED':'EXTREME GREED'):'—';
+    const zn=activeFG!=null?(activeFG<-41?'Despondency':activeFG<-25?'Panic':activeFG<-10?'Fear':activeFG<-5?'Anxiety':activeFG<5?'Balanced':activeFG<10?'Optimism':activeFG<41?'Excitement':activeFG<73?'Thrill':'Euphoria'):'—';
     const sw=r.swing==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.swing==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.swing==='EXIT ZONE'?'<span class="sw sw-x">EXIT</span>':r.swing==='TAKE PROFIT'?'<span class="sw sw-p">PROFIT</span>':'';
     const pr=r.price>=1?'$'+r.price.toFixed(2):r.price>0.001?'$'+r.price.toFixed(4):r.price>0?'$'+r.price.toExponential(2):'—';
     // Highlight active TF column
