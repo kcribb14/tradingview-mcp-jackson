@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F&G Scanner Dashboard</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; }
+.header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.header h1 { font-size: 18px; color: #f0f6fc; }
+.header .meta { font-size: 12px; color: #8b949e; }
+.header .actions { display: flex; gap: 8px; }
+.btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: 0.15s; }
+.btn:hover { background: #30363d; border-color: #8b949e; }
+.btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.btn.refresh { background: #238636; border-color: #238636; color: #fff; }
+
+.heat { display: flex; gap: 20px; padding: 16px 20px; background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: wrap; align-items: center; }
+.heat-score { font-size: 42px; font-weight: 700; min-width: 80px; text-align: center; }
+.heat-bar { flex: 1; min-width: 200px; }
+.heat-bar-inner { height: 8px; border-radius: 4px; display: flex; overflow: hidden; }
+.heat-bar-fear { background: #f85149; }
+.heat-bar-neutral { background: #8b949e; }
+.heat-bar-greed { background: #3fb950; }
+.heat-stats { display: flex; gap: 16px; font-size: 13px; color: #8b949e; margin-top: 4px; }
+.heat-label { font-size: 14px; color: #8b949e; }
+
+.tf-bar { display: flex; gap: 4px; padding: 8px 20px; background: #0d1117; border-bottom: 1px solid #30363d; flex-wrap: wrap; }
+.cat-bar { display: flex; gap: 4px; padding: 8px 20px; background: #0d1117; border-bottom: 1px solid #30363d; flex-wrap: wrap; overflow-x: auto; }
+.cat-btn { font-size: 11px; padding: 4px 10px; white-space: nowrap; }
+.cat-btn .cnt { color: #8b949e; margin-left: 4px; }
+
+.search-bar { padding: 8px 20px; background: #0d1117; }
+.search-bar input { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; width: 100%; max-width: 300px; font-size: 14px; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: #161b22; color: #8b949e; text-align: left; padding: 8px 12px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid #30363d; position: sticky; top: 0; z-index: 1; }
+thead th:hover { color: #f0f6fc; }
+tbody tr { border-bottom: 1px solid #21262d; }
+tbody tr:hover { background: #161b22; }
+td { padding: 6px 12px; white-space: nowrap; }
+.fg-cell { font-weight: 600; text-align: center; border-radius: 4px; padding: 4px 8px; min-width: 60px; display: inline-block; }
+.zone-ef { background: #910000; color: #fff; }
+.zone-f { background: #d32f2f; color: #fff; }
+.zone-wf { background: #e65100; color: #fff; }
+.zone-n { background: #616161; color: #fff; }
+.zone-wg { background: #00796b; color: #fff; }
+.zone-g { background: #388e3c; color: #fff; }
+.zone-eg { background: #1b5e20; color: #fff; }
+.swing-entry { background: #238636; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; animation: pulse 2s infinite; }
+.swing-watch { background: #9e6a03; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.swing-exit { background: #da3633; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.swing-profit { background: #da3633; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+.tier { font-size: 11px; color: #8b949e; }
+.page-info { padding: 8px 20px; font-size: 12px; color: #8b949e; display: flex; justify-content: space-between; flex-wrap: wrap; }
+.cats-summary { padding: 10px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.cat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; }
+.cat-card-name { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.cat-card-fg { font-size: 24px; font-weight: 700; }
+.cat-card-stats { font-size: 11px; color: #8b949e; margin-top: 4px; }
+@media (max-width: 768px) { .hide-mobile { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>F&G Scanner</h1>
+    <div class="meta" id="meta">Loading...</div>
+  </div>
+  <div class="actions">
+    <button class="btn refresh" onclick="refresh()">Refresh</button>
+  </div>
+</div>
+
+<div class="heat" id="heat"></div>
+
+<div class="tf-bar" id="tfBar"></div>
+<div class="cat-bar" id="catBar"></div>
+
+<div class="cats-summary" id="catsSummary"></div>
+
+<div class="search-bar">
+  <input type="text" id="search" placeholder="Search symbol..." oninput="filterTable()">
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr id="thead"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="page-info" id="pageInfo"></div>
+
+<script>
+let DATA = null;
+let currentTF = 'D';
+let currentCat = null;
+let sortCol = 'fg';
+let sortDir = 1; // 1=asc, -1=desc
+let pageSize = 100;
+
+const TFS = [
+  { key: 'D', label: 'Daily' },
+  { key: '15', label: '15m' },
+  { key: '60', label: '1H' },
+  { key: '240', label: '4H' },
+  { key: 'W', label: 'Weekly' },
+];
+
+async function loadData(tf) {
+  const cat = currentCat ? '&category=' + encodeURIComponent(currentCat) : '';
+  const res = await fetch('/api/cached?tf=' + tf + cat);
+  DATA = await res.json();
+  render();
+}
+
+async function refresh() {
+  document.getElementById('meta').textContent = 'Refreshing...';
+  await loadData(currentTF);
+}
+
+function render() {
+  if (!DATA) return;
+
+  // Meta
+  document.getElementById('meta').textContent =
+    DATA.total + ' symbols | ' + DATA.tf + ' | ' + new Date(DATA.updated).toLocaleString();
+
+  // Heat
+  const pctFear = DATA.total > 0 ? Math.round((DATA.rows.filter(r => r.fg <= -5).length / DATA.total) * 100) : 0;
+  const pctGreed = DATA.total > 0 ? Math.round((DATA.rows.filter(r => r.fg >= 5).length / DATA.total) * 100) : 0;
+  const pctNeutral = 100 - pctFear - pctGreed;
+  const heatColor = DATA.avgFG <= -15 ? '#d32f2f' : DATA.avgFG <= -5 ? '#e65100' : DATA.avgFG >= 15 ? '#1b5e20' : DATA.avgFG >= 5 ? '#388e3c' : '#616161';
+  document.getElementById('heat').innerHTML = `
+    <div>
+      <div class="heat-label">Average F&G (${DATA.tf})</div>
+      <div class="heat-score" style="color:${heatColor}">${DATA.avgFG > 0 ? '+' : ''}${DATA.avgFG}</div>
+    </div>
+    <div class="heat-bar">
+      <div class="heat-bar-inner">
+        <div class="heat-bar-fear" style="width:${pctFear}%"></div>
+        <div class="heat-bar-neutral" style="width:${pctNeutral}%"></div>
+        <div class="heat-bar-greed" style="width:${pctGreed}%"></div>
+      </div>
+      <div class="heat-stats">
+        <span style="color:#f85149">Fear: ${pctFear}%</span>
+        <span>Neutral: ${pctNeutral}%</span>
+        <span style="color:#3fb950">Greed: ${pctGreed}%</span>
+        <span>Oversold: ${DATA.oversold}</span>
+        <span>Overbought: ${DATA.overbought}</span>
+      </div>
+    </div>`;
+
+  // TF bar
+  document.getElementById('tfBar').innerHTML = TFS.map(tf =>
+    `<button class="btn ${tf.key === currentTF ? 'active' : ''}" onclick="switchTF('${tf.key}')">${tf.label}</button>`
+  ).join('');
+
+  // Category cards
+  document.getElementById('catsSummary').innerHTML = DATA.categories.map(c => {
+    const color = c.avg <= -15 ? '#d32f2f' : c.avg <= -5 ? '#e65100' : c.avg >= 15 ? '#1b5e20' : c.avg >= 5 ? '#388e3c' : '#8b949e';
+    return `<div class="cat-card">
+      <div class="cat-card-name">${c.name}</div>
+      <div class="cat-card-fg" style="color:${color}">${c.avg > 0 ? '+' : ''}${c.avg}</div>
+      <div class="cat-card-stats">${c.count} symbols | ${c.pctFear}% fear | ${c.entries} entries</div>
+    </div>`;
+  }).join('');
+
+  // Category filter bar
+  const allCats = [{ name: 'All', count: DATA.total }, ...DATA.categories];
+  document.getElementById('catBar').innerHTML = allCats.map(c => {
+    const isActive = (c.name === 'All' && !currentCat) || c.name === currentCat;
+    return `<button class="btn cat-btn ${isActive ? 'active' : ''}" onclick="switchCat('${c.name === 'All' ? '' : c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
+  }).join('');
+
+  renderTable();
+}
+
+function renderTable() {
+  const filtered = getFilteredRows();
+  const page = filtered.slice(0, pageSize);
+
+  // Header
+  const cols = [
+    { key: '#', label: '#', sortable: false },
+    { key: 'symbol', label: 'Symbol', sortable: true },
+    { key: 'fg', label: 'F&G', sortable: true },
+    { key: 'zone', label: 'Zone', sortable: false },
+    { key: 'category', label: 'Category', sortable: true, cls: 'hide-mobile' },
+    { key: 'swing', label: 'Swing', sortable: false },
+    { key: 'tier', label: 'Tier', sortable: true, cls: 'hide-mobile' },
+    { key: 'rsi', label: 'RSI', sortable: true, cls: 'hide-mobile' },
+  ];
+
+  document.getElementById('thead').innerHTML = cols.map(c => {
+    const arrow = sortCol === c.key ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
+    const click = c.sortable ? ` onclick="sortBy('${c.key}')"` : '';
+    return `<th${click} class="${c.cls || ''}">${c.label}${arrow}</th>`;
+  }).join('');
+
+  // Body
+  document.getElementById('tbody').innerHTML = page.map((r, i) => {
+    const fgClass = r.fg <= -30 ? 'zone-ef' : r.fg <= -15 ? 'zone-f' : r.fg <= -5 ? 'zone-wf' :
+      r.fg <= 5 ? 'zone-n' : r.fg <= 15 ? 'zone-wg' : r.fg <= 30 ? 'zone-g' : 'zone-eg';
+    const swingHtml = r.swing === 'ENTRY ZONE' ? '<span class="swing-entry">ENTRY ZONE</span>' :
+      r.swing === 'WATCHING' ? '<span class="swing-watch">WATCHING</span>' :
+      r.swing === 'EXIT ZONE' ? '<span class="swing-exit">EXIT ZONE</span>' :
+      r.swing === 'TAKE PROFIT' ? '<span class="swing-profit">TAKE PROFIT</span>' : '';
+    return `<tr>
+      <td>${i + 1}</td>
+      <td><strong>${r.symbol}</strong></td>
+      <td><span class="fg-cell ${fgClass}">${r.fg > 0 ? '+' : ''}${r.fg.toFixed(1)}</span></td>
+      <td>${r.zone}</td>
+      <td class="hide-mobile">${r.category}</td>
+      <td>${swingHtml}</td>
+      <td class="hide-mobile tier">T${r.tier}</td>
+      <td class="hide-mobile">${r.rsi != null ? r.rsi.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('pageInfo').innerHTML =
+    `<span>Showing ${page.length} of ${filtered.length} symbols</span>
+     <span>
+       <button class="btn" onclick="pageSize=50;renderTable()">50</button>
+       <button class="btn" onclick="pageSize=100;renderTable()">100</button>
+       <button class="btn" onclick="pageSize=250;renderTable()">250</button>
+       <button class="btn" onclick="pageSize=9999;renderTable()">All</button>
+     </span>`;
+}
+
+function getFilteredRows() {
+  let rows = DATA ? [...DATA.rows] : [];
+  const search = document.getElementById('search').value.toUpperCase();
+  if (search) rows = rows.filter(r => r.symbol.includes(search));
+
+  // Sort
+  rows.sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+    return ((va ?? 0) - (vb ?? 0)) * sortDir;
+  });
+
+  return rows;
+}
+
+function switchTF(tf) { currentTF = tf; loadData(tf); }
+function switchCat(cat) { currentCat = cat || null; loadData(currentTF); }
+function sortBy(col) { if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = col === 'fg' ? 1 : -1; } renderTable(); }
+function filterTable() { renderTable(); }
+
+// Initial load
+loadData('D');
+</script>
+</body>
+</html>
