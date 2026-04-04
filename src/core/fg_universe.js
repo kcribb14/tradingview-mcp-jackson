@@ -12,6 +12,7 @@ import {
 import { fetchOhlcv as fetchYahooOhlcv } from './yahoo_ohlcv.js';
 import { getUSStocks, getASXStocks, getCryptoTokens, getPreset, getUniverseStats } from './universes.js';
 import { optimalEntry } from './fg_backtest.js';
+import { classifyCalibratedZone, calibratedEntry } from './fg_calibrated.js';
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ async function batchScan(symbols, batchSize = 50, concurrency = 20) {
     const key = sym.toUpperCase() + ':D';
     const entry = cache[key];
     if (entry && getScanTier(entry, now) === 'INSTANT') {
-      results.push({ symbol: sym, ...entryToResult(entry), scan_tier: 'INSTANT' });
+      results.push({ symbol: sym, ...entryToResult(entry, sym), scan_tier: 'INSTANT' });
       cachedCount++;
     } else {
       needFetch.push(sym);
@@ -87,7 +88,7 @@ async function batchScan(symbols, batchSize = 50, concurrency = 20) {
         const fg = computeFGFromBars(data.bars, cache[key]?._state || {}, globals);
         if (fg) {
           cache[key] = updateCacheEntry(sym, data.bars, cache[key], globals);
-          results.push({ symbol: sym, ...entryToResult(cache[key]), scan_tier: 'FETCHED' });
+          results.push({ symbol: sym, ...entryToResult(cache[key], sym), scan_tier: 'FETCHED' });
           fetchedCount++;
           sourceCounts[data.source] = (sourceCounts[data.source] || 0) + 1;
         } else { errorCount++; }
@@ -105,11 +106,18 @@ async function batchScan(symbols, batchSize = 50, concurrency = 20) {
   };
 }
 
-function entryToResult(entry) {
+function entryToResult(entry, symbol) {
+  const cal = classifyCalibratedZone(symbol || '', entry.fgScore);
   return {
     fg_score: entry.fgScore,
     zone: entry.zone,
     severity: entry.severity,
+    calibrated_zone: cal.zone,
+    calibrated_severity: cal.severity,
+    asset_class: cal.class,
+    rare_fear_threshold: cal.thresholds.extreme_fear,
+    distance_to_rare_fear: cal.distance_to_rare_fear,
+    is_rare_fear: cal.is_triggered,
     components: entry.components,
     rsi: entry.rsi,
   };
@@ -319,9 +327,9 @@ function formatOutput(scanType, market, results, timing, coverage, top, sort, to
     default:           results.sort((a, b) => a.fg_score - b.fg_score); break;
   }
 
-  // Enrich fear opportunities with entry timing advice
-  const fearOpps = results.filter(r => r.severity <= -1).slice(0, 20).map(r => {
-    const advice = optimalEntry(r.symbol, r.fg_score, r.market, BACKTEST_STATS);
+  // Enrich fear opportunities: use CALIBRATED thresholds (severity based on asset class)
+  const fearOpps = results.filter(r => r.calibrated_severity <= -1).slice(0, 20).map(r => {
+    const advice = calibratedEntry(r.symbol, r.fg_score);
     return { ...r, entry: advice };
   });
 
@@ -341,7 +349,7 @@ function formatOutput(scanType, market, results, timing, coverage, top, sort, to
     },
     results: top > 0 ? results.slice(0, top) : [],
     fear_opportunities: fearOpps,
-    greed_warnings: [...results].sort((a, b) => b.fg_score - a.fg_score).filter(r => r.severity >= 1).slice(0, 10),
+    greed_warnings: [...results].sort((a, b) => b.fg_score - a.fg_score).filter(r => r.calibrated_severity >= 1).slice(0, 10),
     distribution: getDist(results),
   };
 }
