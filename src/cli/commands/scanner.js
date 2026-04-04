@@ -9,6 +9,7 @@ import * as universe from '../../core/fg_universe.js';
 import * as backtest from '../../core/fg_backtest.js';
 import * as production from '../../core/fg_production.js';
 import * as prodMTF from '../../core/fg_production_mtf.js';
+import * as tracker from '../../core/fg_tracker.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -273,6 +274,25 @@ register('scan', {
     ['watch', {
       description: 'Show symbols approaching fear threshold (within 5 points of rare fear)',
       handler: () => production.watchList(),
+    }],
+    ['track', {
+      description: 'Show live P&L on all tracked signals',
+      handler: async () => {
+        await tracker.updateTracking();
+        return tracker.getTracking();
+      },
+    }],
+    ['track-log', {
+      description: 'Manually log a signal for tracking',
+      handler: (opts, positionals) => {
+        if (positionals.length < 2) throw new Error('Usage: tv scan track-log SYMBOL PRICE [type]');
+        return tracker.logSignal({
+          symbol: positionals[0],
+          entry_price: Number(positionals[1]),
+          type: positionals[2] || 'MANUAL',
+          fg_score: null, class: 'MANUAL', tier: 0, confidence: 0,
+        });
+      },
     }],
     ['outperformers', {
       description: 'Analyze which symbols historically outperform from fear signals',
