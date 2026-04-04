@@ -105,40 +105,56 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
 
   const closes = bars.map(b => b.close);
   const lastClose = closes[closes.length - 1];
+  const lastBar = bars[bars.length - 1];
 
   // ── pmacd: price vs EMA(144) ──
+  // DGT uses: (close / ema144 - 1) * 100, then applies RMA smoothing
   let ema144 = state.ema144 ?? null;
-  const startIdx = state.ema144 != null ? 0 : 0; // if no state, calc from all bars
   if (ema144 == null) {
     ema144 = calcEMA(closes, 144);
   } else {
-    // Incrementally update from new bars only
     for (const c of closes) {
       ema144 = updateEMA(ema144, c, 144);
     }
   }
-  const pmacd = ema144 > 0 ? (lastClose / ema144 - 1) * 100 : 0;
+  const pmacdRaw = ema144 > 0 ? (lastClose / ema144 - 1) * 100 : 0;
+  // Scale: 1% deviation = ~3 points, capped at ±40
+  const pmacd = Math.max(-40, Math.min(40, pmacdRaw * 3));
 
-  // ── ror: rate of return over available period ──
+  // ── ror: rate of return over 20 bars ──
+  // DGT uses: rate of change over lookback period
   const refClose = bars.length > 20 ? closes[closes.length - 21] : closes[0];
-  const ror = refClose > 0 ? (lastClose - refClose) / refClose * 100 : 0;
+  const rorRaw = refClose > 0 ? (lastClose - refClose) / refClose * 100 : 0;
+  const ror = Math.max(-50, Math.min(50, rorRaw * 2));
 
-  // ── moneyFlow: volume-weighted direction ──
-  const recentBars = bars.slice(-5);
-  const oldBars = bars.slice(0, 5);
-  const recentVol = recentBars.reduce((s, b) => s + (b.volume || 0), 0) / recentBars.length;
-  const oldVol = oldBars.reduce((s, b) => s + (b.volume || 0), 0) / oldBars.length;
-  const volRatio = oldVol > 0 ? recentVol / oldVol : 1;
-  const lastBar = bars[bars.length - 1];
-  const mfMultiplier = lastBar.high !== lastBar.low
-    ? ((2 * lastBar.close - lastBar.low - lastBar.high) / (lastBar.high - lastBar.low)) * 100
-    : 0;
-  const moneyFlow = Math.max(-30, Math.min(30, mfMultiplier * 0.3 + (volRatio - 1) * 15));
+  // ── moneyFlow: MFI-style calculation over 14 bars ──
+  // DGT uses Money Flow Index: cumulative positive/negative flow ratio
+  const mfPeriod = Math.min(14, bars.length - 1);
+  const mfBars = bars.slice(-mfPeriod - 1);
+  let posFlow = 0, negFlow = 0;
+  for (let i = 1; i < mfBars.length; i++) {
+    const tp = (mfBars[i].high + mfBars[i].low + mfBars[i].close) / 3;
+    const prevTp = (mfBars[i-1].high + mfBars[i-1].low + mfBars[i-1].close) / 3;
+    const rawMf = tp * (mfBars[i].volume || 0);
+    if (tp > prevTp) posFlow += rawMf;
+    else if (tp < prevTp) negFlow += rawMf;
+  }
+  const mfi = negFlow > 0 ? 100 - 100 / (1 + posFlow / negFlow) : (posFlow > 0 ? 100 : 50);
+  // MFI 50 = neutral, >70 = overbought (greed), <30 = oversold (fear)
+  const moneyFlow = Math.max(-50, Math.min(50, (mfi - 50) * 1.2));
 
-  // ── vix: volatility proxy from bar ranges ──
-  const ranges = bars.slice(-20).map(b => b.high > 0 ? (b.high - b.low) / b.high * 100 : 0);
-  const avgRange = ranges.reduce((s, v) => s + v, 0) / ranges.length;
-  const vixProxy = Math.max(-20, Math.min(10, -(avgRange - 1.5) * 8));
+  // ── vix: volatility proxy from ATR-style calculation ──
+  // DGT uses VIX-relative measure; we approximate with ATR/close ratio
+  const atrPeriod = Math.min(14, bars.length - 1);
+  const atrBars = bars.slice(-atrPeriod);
+  let atrSum = 0;
+  for (const b of atrBars) {
+    atrSum += (b.high - b.low);
+  }
+  const atr = atrSum / atrBars.length;
+  const atrPct = lastClose > 0 ? (atr / lastClose) * 100 : 0;
+  // ATR% of 1.5% is normal; higher = fear, lower = complacency
+  const vixProxy = Math.max(-50, Math.min(20, -(atrPct - 1.5) * 10));
 
   // ── gold: from global cache ──
   const goldProxy = globals.gold ?? 0;
@@ -170,8 +186,9 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   rsi = calcRSI(avgGain, avgLoss);
 
   // ── Composite F&G score ──
+  // DGT averages all 5 components equally, then applies RMA smoothing
   const components = { pmacd, ror, moneyFlow, vix: vixProxy, gold: goldProxy };
-  const raw = (pmacd * 0.3 + ror * 0.25 + moneyFlow * 0.25 + vixProxy * 0.15 + goldProxy * 0.05);
+  const raw = (pmacd + ror + moneyFlow + vixProxy + goldProxy) / 5;
   const fgScore = Math.max(-60, Math.min(60, Math.round(raw * 100) / 100));
   const { zone, severity } = classifyZone(fgScore);
 
