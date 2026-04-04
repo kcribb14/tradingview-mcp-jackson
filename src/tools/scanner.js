@@ -5,6 +5,7 @@ import * as fgScanner from '../core/fg_scanner.js';
 import * as fgFast from '../core/fg_fast_scanner.js';
 import * as fgExact from '../core/fg_exact_scanner.js';
 import * as dex from '../core/dexscreener.js';
+import * as backtest from '../core/fg_backtest.js';
 
 export function registerScannerTools(server) {
   server.tool('scanner_bulk_scan', 'Scan 100 stocks in ~8 seconds using screener data across multiple views. Returns ranked results with momentum, value, trend, and volume scores. No chart switching needed.', {
@@ -86,6 +87,14 @@ export function registerScannerTools(server) {
     top: z.number().optional().describe('Return top N results (default 50)'),
   }, async ({ chain, top }) => {
     try { return jsonResult(await dex.dexScan({ chain, top })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('scanner_backtest', 'Backtest F&G fear signals on historical data. Shows: days to bottom, drawdown after signal, 30/60/90-day returns, win rates, and optimal entry strategy comparison.', {
+    symbols: z.array(z.string()).describe('Symbols to backtest (e.g., ["AAPL", "BTC", "BHP.AX"])'),
+    years: z.number().optional().describe('Years of history to analyze (default 2)'),
+  }, async ({ symbols, years }) => {
+    try { return jsonResult(await backtest.backtestMultiple(symbols, years || 2, 10)); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

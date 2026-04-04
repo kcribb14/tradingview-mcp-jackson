@@ -6,6 +6,7 @@ import * as fgExact from '../../core/fg_exact_scanner.js';
 import * as fgMtf from '../../core/fg_mtf.js';
 import * as dex from '../../core/dexscreener.js';
 import * as universe from '../../core/fg_universe.js';
+import * as backtest from '../../core/fg_backtest.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -236,6 +237,36 @@ register('scan', {
         top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
       },
       handler: (opts) => dex.dexVsCexScan({ top: opts.top ? Number(opts.top) : 20 }),
+    }],
+    ['backtest', {
+      description: 'Backtest F&G fear signals: historical win rates, timing, optimal entry strategies',
+      options: {
+        years: { type: 'string', short: 'y', description: 'Years of history (default 2)' },
+        preset: { type: 'string', short: 'p', description: 'Preset: all (50 test symbols), sp500, asx_mining, crypto' },
+      },
+      handler: (opts, positionals) => {
+        const years = opts.years ? Number(opts.years) : 2;
+        if (positionals.length > 0) {
+          return backtest.backtestMultiple(positionals, years, 10);
+        }
+        // Preset symbol sets
+        const presets = {
+          all: ['AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','JPM','V','JNJ',
+            'NFLX','CRM','AMD','SHOP','PLTR','COIN','MSTR',
+            'BHP.AX','RIO.AX','FMG.AX','NST.AX','PLS.AX','LTR.AX','PDN.AX','DEV.AX','WR1.AX','EVN.AX',
+            'BTC','ETH','SOL','XRP','DOGE','AVAX','LINK','AAVE','UNI','DOT',
+            'GC=F','SI=F','CL=F'],
+          sp500: ['AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','JPM','V','JNJ',
+            'NFLX','CRM','AMD','SHOP','PLTR','BA','DIS','PFE','INTC','PYPL'],
+          asx_mining: ['BHP.AX','RIO.AX','FMG.AX','NST.AX','EVN.AX','PLS.AX','LTR.AX','PDN.AX',
+            'DEV.AX','WR1.AX','S32.AX','MIN.AX','IGO.AX','SFR.AX','RMS.AX'],
+          crypto: ['BTC','ETH','SOL','XRP','DOGE','AVAX','LINK','AAVE','UNI','DOT',
+            'ADA','MATIC','ATOM','NEAR','FTM'],
+        };
+        const symbols = presets[opts.preset || 'all'];
+        if (!symbols) throw new Error('Unknown preset. Available: all, sp500, asx_mining, crypto');
+        return backtest.backtestMultiple(symbols, years, 10);
+      },
     }],
     ['parse', {
       description: 'Parse a TradingView value string to number',

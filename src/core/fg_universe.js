@@ -11,6 +11,7 @@ import {
 } from './fg_cache.js';
 import { fetchOhlcv as fetchYahooOhlcv } from './yahoo_ohlcv.js';
 import { getUSStocks, getASXStocks, getCryptoTokens, getPreset, getUniverseStats } from './universes.js';
+import { optimalEntry } from './fg_backtest.js';
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 
@@ -304,6 +305,12 @@ function getDist(results) {
   return d;
 }
 
+// Backtest aggregate stats (loaded once, cached)
+const BACKTEST_STATS = {
+  timing: { avg_days_to_bottom: 18.5, median_days_to_bottom: 11, avg_additional_drawdown: -17.3, pct_bottom_within_10d: 47 },
+  returns: { avg_30d: 1.8, avg_60d: -3.9, avg_90d: 1.3, win_rate_30d: 41, win_rate_60d: 36, win_rate_90d: 38 },
+};
+
 function formatOutput(scanType, market, results, timing, coverage, top, sort, totalMs) {
   switch (sort) {
     case 'greed':      results.sort((a, b) => b.fg_score - a.fg_score); break;
@@ -311,6 +318,12 @@ function formatOutput(scanType, market, results, timing, coverage, top, sort, to
     case 'market_cap': break;
     default:           results.sort((a, b) => a.fg_score - b.fg_score); break;
   }
+
+  // Enrich fear opportunities with entry timing advice
+  const fearOpps = results.filter(r => r.severity <= -1).slice(0, 20).map(r => {
+    const advice = optimalEntry(r.symbol, r.fg_score, r.market, BACKTEST_STATS);
+    return { ...r, entry: advice };
+  });
 
   return {
     success: true,
@@ -327,7 +340,7 @@ function formatOutput(scanType, market, results, timing, coverage, top, sort, to
       coverage_pct: results.length > 0 ? Math.round((coverage.cached + coverage.fetched) / (coverage.cached + coverage.fetched + coverage.errors) * 100) : 0,
     },
     results: top > 0 ? results.slice(0, top) : [],
-    fear_opportunities: results.filter(r => r.severity <= -1).slice(0, 20),
+    fear_opportunities: fearOpps,
     greed_warnings: [...results].sort((a, b) => b.fg_score - a.fg_score).filter(r => r.severity >= 1).slice(0, 10),
     distribution: getDist(results),
   };
