@@ -225,12 +225,12 @@ export async function productionMTF({ us = 2000, asx = 2000, crypto = 500, top =
     const intraDayFear = (fg15 != null && fg15 <= -15) || (fg1H != null && fg1H <= -15);
     const intraDayRecovering = fg15 != null && fg1H != null && fg15 > fg1H;
 
-    // Backtest-validated signal stats (from 607-event MTF backtest)
+    // Backtest-validated signal stats (from 10,667-event large-scale backtest)
     const SIGNAL_STATS = {
-      FULL_ALIGNMENT: { ret: -7.51, wr: 50, sharpe: -3.04, p: 0.22, validated: false, note: 'DEBUNKED — worst performer' },
-      EARLY_WARNING:  { ret: -0.21, wr: 45, sharpe: -0.16, p: 1.34, validated: false, note: 'Not profitable at 10d' },
-      RECOVERY:       { ret: 5.58, wr: 78, sharpe: 4.83, p: 0.01, validated: true, note: 'BEST — 78% WR, lowest drawdown' },
-      DIVERGENCE:     { ret: 2.18, wr: 54, sharpe: 0.97, p: 0.001, validated: true, note: 'Significant, moderate edge' },
+      FULL_ALIGNMENT: { ret: 1.13, wr: 38, sharpe: 0.2, p: 1.06, validated: false, note: 'NOT significant — 38% WR' },
+      EARLY_WARNING:  { ret: 0.1, wr: 41, sharpe: 0.02, p: 1.81, validated: false, note: 'NOT profitable — 41% WR' },
+      RECOVERY:       { ret: 5.48, wr: 49, sharpe: 0.93, p: 0.15, validated: false, note: 'High return but NOT significant (p=0.15, N=80)' },
+      DIVERGENCE_BULL:{ ret: 1.61, wr: 49, sharpe: 0.5, p: 0.001, validated: true, note: 'Significant — 6745 events at scale' },
     };
 
     if (allFear) {
@@ -244,7 +244,7 @@ export async function productionMTF({ us = 2000, asx = 2000, crypto = 500, top =
     } else if (dailyFear && intraDayRecovering) {
       entry.signal_type = 'RECOVERY';
       entry.signal_stats = SIGNAL_STATS.RECOVERY;
-      entry.confidence = Math.min(95, entry.confidence + 20); // Boost: proven best signal
+      // No confidence boost — Recovery NOT validated at scale (p=0.15)
       recoveries.push(entry);
     }
 
