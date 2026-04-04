@@ -8,6 +8,7 @@ import * as dex from '../../core/dexscreener.js';
 import * as universe from '../../core/fg_universe.js';
 import * as backtest from '../../core/fg_backtest.js';
 import * as production from '../../core/fg_production.js';
+import * as prodMTF from '../../core/fg_production_mtf.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -252,6 +253,21 @@ register('scan', {
         asx: opts.asx ? Number(opts.asx) : 2000,
         crypto: opts.crypto ? Number(opts.crypto) : 200,
         top: opts.top ? Number(opts.top) : 20,
+      }),
+    }],
+    ['production-mtf', {
+      description: 'Full universe × 4 timeframes: 4000+ symbols on 15m, 1H, 4H, Daily. Maximum scale.',
+      options: {
+        us: { type: 'string', description: 'US stock count (default 2000)' },
+        asx: { type: 'string', description: 'ASX stock count (default 2000)' },
+        crypto: { type: 'string', description: 'Crypto count (default 500)' },
+        top: { type: 'string', short: 'n', description: 'Top N per section (default 30)' },
+      },
+      handler: (opts) => prodMTF.productionMTF({
+        us: opts.us ? Number(opts.us) : 2000,
+        asx: opts.asx ? Number(opts.asx) : 2000,
+        crypto: opts.crypto ? Number(opts.crypto) : 500,
+        top: opts.top ? Number(opts.top) : 30,
       }),
     }],
     ['watch', {
