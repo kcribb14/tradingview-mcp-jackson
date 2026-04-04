@@ -81,19 +81,39 @@ app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
 function buildData(tf, categoryFilter) {
   const cache = loadCache();
   const sfxMap = { '15m': ':15', '15': ':15', '1h': ':60', '60': ':60', '4h': ':240', '240': ':240', 'd': ':D', 'daily': ':D', 'w': ':W', 'weekly': ':W' };
-  const suffix = sfxMap[tf.toLowerCase()] || ':D';
-  const tfLabel = { ':15': '15m', ':60': '1H', ':240': '4H', ':D': 'Daily', ':W': 'Weekly' }[suffix];
+  const requestedSuffix = sfxMap[tf.toLowerCase()] || ':D';
+  const tfLabel = { ':15': '15m', ':60': '1H', ':240': '4H', ':D': 'Daily', ':W': 'Weekly' }[requestedSuffix];
 
-  const rows = [];
+  // Collect ALL TF scores per symbol (keyed by Daily as primary)
+  const symbolData = new Map();
   for (const [key, entry] of Object.entries(cache)) {
-    if (!key.endsWith(suffix) || entry?.fgScore == null) continue;
-    const sym = key.replace(suffix, '');
+    if (entry?.fgScore == null) continue;
+    const lastColon = key.lastIndexOf(':');
+    const sym = key.substring(0, lastColon);
+    const sfx = key.substring(lastColon);
+    if (!symbolData.has(sym)) symbolData.set(sym, {});
+    const tfKey = { ':15': 'fg_15m', ':60': 'fg_1H', ':240': 'fg_4H', ':D': 'fg_D', ':W': 'fg_W' }[sfx];
+    if (tfKey) {
+      symbolData.get(sym)[tfKey] = entry.fgScore;
+      if (sfx === ':D') {
+        symbolData.get(sym)._daily = entry; // keep full daily entry
+      }
+    }
+  }
+
+  // Build rows — require at least Daily data
+  const rows = [];
+  for (const [sym, tfScores] of symbolData) {
+    const entry = tfScores._daily;
+    if (!entry) continue; // skip symbols without daily
     const cls = detectAssetClass(sym);
     const catLabel = { US_LARGE_CAP: 'US Large Cap', US_MID_SMALL: 'US Mid/Small', ASX_TOP50: 'ASX Top 50', ASX_MINING_MID: 'ASX Mining Mid', ASX_MINING_MICRO: 'ASX Mining Micro', CRYPTO_MAJOR: 'Crypto Major', CRYPTO_MID: 'Crypto Mid', COMMODITIES: 'Commodities', ETFS: 'ETFs' }[cls] || cls;
 
     if (categoryFilter && cls !== categoryFilter && catLabel !== categoryFilter) continue;
 
-    const fg = entry.fgScore;
+    // Primary F&G: use requested TF, fall back to daily
+    const fgKey = { ':15': 'fg_15m', ':60': 'fg_1H', ':240': 'fg_4H', ':D': 'fg_D', ':W': 'fg_W' }[requestedSuffix] || 'fg_D';
+    const fg = tfScores[fgKey] ?? tfScores.fg_D ?? entry.fgScore;
     const price = entry.lastClose || 0;
     const mcap = estimateMcap(sym, price);
 
@@ -110,7 +130,12 @@ function buildData(tf, categoryFilter) {
     const tier = ['US_LARGE_CAP', 'ASX_MINING_MID', 'ASX_MINING_MICRO', 'COMMODITIES'].includes(cls) ? 1 :
       ['US_MID_SMALL', 'ETFS', 'ASX_TOP50', 'CRYPTO_MAJOR'].includes(cls) ? 2 : 3;
 
-    rows.push({ symbol: sym, fg, zone: zn, category: catLabel, cls, tier, swing: sw, rsi: entry.rsi, price, mcap });
+    rows.push({
+      symbol: sym, fg, zone: zn, category: catLabel, cls, tier, swing: sw, rsi: entry.rsi, price, mcap,
+      fg_15m: tfScores.fg_15m ?? null, fg_1H: tfScores.fg_1H ?? null,
+      fg_4H: tfScores.fg_4H ?? null, fg_D: tfScores.fg_D ?? entry.fgScore,
+      fg_W: tfScores.fg_W ?? null,
+    });
   }
 
   rows.sort((a, b) => a.fg - b.fg);
@@ -132,12 +157,21 @@ function buildData(tf, categoryFilter) {
 
   const avgFG = rows.length > 0 ? Math.round(rows.reduce((s, r) => s + r.fg, 0) / rows.length * 100) / 100 : 0;
 
+  // Count available TFs
+  const tfCounts = { '15m': 0, '1H': 0, '4H': 0, 'Daily': rows.length, 'Weekly': 0 };
+  for (const r of rows) {
+    if (r.fg_15m != null) tfCounts['15m']++;
+    if (r.fg_1H != null) tfCounts['1H']++;
+    if (r.fg_4H != null) tfCounts['4H']++;
+    if (r.fg_W != null) tfCounts['Weekly']++;
+  }
+
   return {
     tf: tfLabel, updated: new Date().toISOString(), total: rows.length,
     avgFG, oversold: rows.filter(r => r.fg <= -25).length, overbought: rows.filter(r => r.fg >= 25).length,
     pctOversold: rows.length > 0 ? Math.round(rows.filter(r => r.fg <= -25).length / rows.length * 100) : 0,
     pctOverbought: rows.length > 0 ? Math.round(rows.filter(r => r.fg >= 25).length / rows.length * 100) : 0,
-    categories: catList, rows,
+    categories: catList, rows, tfCounts,
   };
 }
 

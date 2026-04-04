@@ -270,9 +270,21 @@ function renderPills(){
   document.getElementById('pillsBar').innerHTML=html;
 }
 
-function fmt$(v){if(v>=1e12)return'$'+(v/1e12).toFixed(1)+'T';if(v>=1e9)return'$'+(v/1e9).toFixed(1)+'B';if(v>=1e6)return'$'+(v/1e6).toFixed(0)+'M';return'$'+Math.round(v)}
+function fmt$(v){if(v>=1e12)return'$'+(v/1e12).toFixed(1)+'T';if(v>=1e9)return'$'+(v/1e9).toFixed(1)+'B';if(v>=1e6)return'$'+(v/1e6).toFixed(1)+'M';if(v>=1e3)return'$'+(v/1e3).toFixed(0)+'K';return'$'+Math.round(v)}
 
-async function loadData(tf){const c=cCat?'&category='+encodeURIComponent(cCat):'';const r=await fetch('/api/cached?tf='+tf+c);D=await r.json();render()}
+async function loadData(tf){
+  const c=cCat?'&category='+encodeURIComponent(cCat):'';
+  const r=await fetch('/api/cached?tf=D'+c); // Always fetch all data; TF switching is client-side
+  D=await r.json();
+  D.tf=TFS.find(t=>t.k===cTF)?.l||'Daily';
+  render();
+}
+
+// Get the F&G value for a row at the current TF
+function fgForTF(row){
+  const map={D:'fg_D','15':'fg_15m','60':'fg_1H','240':'fg_4H',W:'fg_W'};
+  return row[map[cTF]]??row.fg_D??row.fg;
+}
 async function refresh(){document.getElementById('meta').textContent='Refreshing...';await loadData(cTF)}
 
 function render(){
@@ -282,16 +294,17 @@ function render(){
 }
 
 function renderSidebar(){
-  const filtered=applyFiltersToRows(D.rows);
+  const filtered=applyFiltersToRows(D.rows).filter(r=>fgForTF(r)!=null);
   const total=filtered.length;
-  const pF=total>0?Math.round(filtered.filter(r=>r.fg<=-5).length/total*100):0;
-  const pG=total>0?Math.round(filtered.filter(r=>r.fg>=5).length/total*100):0;
-  const avgFG=total>0?Math.round(filtered.reduce((s,r)=>s+r.fg,0)/total*100)/100:0;
+  const scores=filtered.map(r=>fgForTF(r));
+  const pF=total>0?Math.round(scores.filter(v=>v<=-5).length/total*100):0;
+  const pG=total>0?Math.round(scores.filter(v=>v>=5).length/total*100):0;
+  const avgFG=total>0?Math.round(scores.reduce((s,v)=>s+v,0)/total*100)/100:0;
   const tp=Math.max(0,Math.min(100,(avgFG+50)/100*100));
   const ac=avgFG<=-15?'#f6465d':avgFG<=-5?'#e65100':avgFG>=15?'#0ecb81':avgFG>=5?'#2e7d32':'#848e9c';
   const entries=filtered.filter(r=>r.swing==='ENTRY ZONE').length;
-  const oversold=filtered.filter(r=>r.fg<=-25).length;
-  const overbought=filtered.filter(r=>r.fg>=25).length;
+  const oversold=scores.filter(v=>v<=-25).length;
+  const overbought=scores.filter(v=>v>=25).length;
   document.getElementById('sidebar').innerHTML=`
     <div class="card"><div class="card-title">Average F&G (${D.tf}) · ${total.toLocaleString()} symbols</div>
       <div class="card-value" style="color:${ac}">${avgFG>0?'+':''}${avgFG}</div>
@@ -309,7 +322,17 @@ function renderSidebar(){
       <div class="card-row"><span>Entry Zone</span><span style="color:#f0b90b;font-weight:600">${entries}</span></div></div>`;
 }
 
-function renderTFBar(){document.getElementById('tfBar').innerHTML=TFS.map(t=>`<button class="btn ${t.k===cTF?'active':''}" onclick="switchTF('${t.k}')">${t.l}</button>`).join('')}
+function renderTFBar(){
+  const tc=D.tfCounts||{};
+  document.getElementById('tfBar').innerHTML=TFS.map(t=>{
+    const count=tc[t.l]||0;
+    const avail=t.k==='D'||count>0;
+    const cls=t.k===cTF?'active':avail?'':'';
+    const style=avail?'':'opacity:0.4;pointer-events:none';
+    const label=avail?t.l:t.l+' (0)';
+    return`<button class="btn ${cls}" style="${style}" onclick="switchTF('${t.k}')">${label}</button>`;
+  }).join('');
+}
 
 function renderCatTabs(){
   const all=[{name:'All',count:D.total},...D.categories.map(c=>({name:c.name,count:c.count}))];
@@ -324,23 +347,24 @@ function renderScatter(){
   const ct=canvas.parentElement;
   canvas.width=ct.clientWidth;canvas.height=ct.clientHeight;
 
-  // Select points: filtered rows with mcap, sample to max 600
-  let pts=applyFiltersToRows(D.rows).filter(r=>r.mcap>0);
+  // Select points: filtered, with valid TF score and mcap
+  let pts=applyFiltersToRows(D.rows).filter(r=>r.mcap>0&&fgForTF(r)!=null);
   if(pts.length>600){
-    const ext=pts.filter(r=>Math.abs(r.fg)>15).slice(0,300);
-    const rest=pts.filter(r=>Math.abs(r.fg)<=15).sort(()=>Math.random()-.5).slice(0,300);
+    const ext=pts.filter(r=>Math.abs(fgForTF(r))>15).slice(0,300);
+    const rest=pts.filter(r=>Math.abs(fgForTF(r))<=15).sort(()=>Math.random()-.5).slice(0,300);
     pts=[...ext,...rest];
   }
 
-  // Show labels only for largest/most extreme (top 40 by mcap or extreme fg)
+  // Labels: only extreme readings + top by mcap (avoid overlap)
   const byMcap=[...pts].sort((a,b)=>b.mcap-a.mcap);
   const labelSet=new Set();
-  byMcap.slice(0,20).forEach(p=>labelSet.add(p.symbol));
-  pts.filter(r=>Math.abs(r.fg)>30).slice(0,20).forEach(p=>labelSet.add(p.symbol));
+  byMcap.slice(0,15).forEach(p=>labelSet.add(p.symbol));
+  pts.filter(r=>fgForTF(r)<-30||fgForTF(r)>20).slice(0,15).forEach(p=>labelSet.add(p.symbol));
 
-  const data=pts.map(r=>({
-    x:r.mcap,y:r.fg,label:r.symbol,cat:r.category,swing:r.swing,price:r.price,showLabel:labelSet.has(r.symbol)
-  }));
+  const data=pts.map(r=>{
+    const v=fgForTF(r);
+    return{x:r.mcap,y:v,label:r.symbol,cat:r.category,swing:r.swing,price:r.price,showLabel:labelSet.has(r.symbol)};
+  });
 
   if(chart)chart.destroy();
 
@@ -402,8 +426,8 @@ function renderScatter(){
       beforeDraw(ch){
         const ctx=ch.ctx;const{top,bottom,left,right}=ch.chartArea;const yS=ch.scales.y;
         const zones=[
-          [30,45,'rgba(145,0,0,0.3)'],[15,30,'rgba(246,70,93,0.15)'],[5,15,'rgba(246,70,93,0.06)'],
-          [-5,5,'rgba(71,77,87,0.12)'],[-15,-5,'rgba(14,203,129,0.06)'],[-30,-15,'rgba(14,203,129,0.15)'],[-45,-30,'rgba(14,203,129,0.3)']
+          [30,45,'rgba(145,0,0,0.35)'],[20,30,'rgba(246,70,93,0.18)'],[10,20,'rgba(246,70,93,0.08)'],
+          [-10,10,'rgba(71,77,87,0.10)'],[-20,-10,'rgba(14,203,129,0.08)'],[-30,-20,'rgba(14,203,129,0.18)'],[-45,-30,'rgba(14,203,129,0.35)']
         ];
         for(const[f,t,c]of zones){const y1=yS.getPixelForValue(t),y2=yS.getPixelForValue(f);ctx.fillStyle=c;ctx.fillRect(left,y1,right-left,y2-y1)}
         ctx.fillStyle='rgba(234,236,239,0.2)';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';
@@ -415,22 +439,55 @@ function renderScatter(){
   });
 }
 
+function fgBadge(v){
+  if(v==null)return'<span style="color:#5e6673">—</span>';
+  const fc=v<=-30?'z0':v<=-15?'z1':v<=-5?'z2':v<=5?'z3':v<=15?'z4':v<=30?'z5':'z6';
+  return`<span class="fg-b ${fc}">${v>0?'+':''}${v.toFixed(1)}</span>`;
+}
+
 function renderTable(){
   const rows=getF();const page=rows.slice(0,pSz);
+  // Active TF column key
+  const tfKey={D:'fg_D','15':'fg_15m','60':'fg_1H','240':'fg_4H',W:'fg_W'}[cTF]||'fg_D';
+
   const cols=[
-    {k:'#',l:'#'},{k:'symbol',l:'Symbol',s:1},{k:'price',l:'Price',s:1,c:'hm'},{k:'mcap',l:'Market Cap',s:1,c:'hm'},
-    {k:'fg',l:'F&G ('+D.tf+')',s:1},{k:'zone',l:'Zone'},{k:'category',l:'Category',s:1,c:'hm'},
-    {k:'swing',l:'Swing'},{k:'tier',l:'Tier',s:1,c:'hm'}
+    {k:'#',l:'#'},
+    {k:'symbol',l:'Symbol',s:1},
+    {k:'price',l:'Price',s:1,c:'hm'},
+    {k:'mcap',l:'Market Cap',s:1,c:'hm'},
+    {k:'fg_15m',l:'15m',s:1,c:'hm'},
+    {k:'fg_1H',l:'1H',s:1,c:'hm'},
+    {k:'fg_4H',l:'4H',s:1,c:'hm'},
+    {k:'fg_D',l:'Daily',s:1},
+    {k:'fg_W',l:'Weekly',s:1,c:'hm'},
+    {k:'zone',l:'Zone'},
+    {k:'swing',l:'Swing'},
   ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
-  document.getElementById('thead').innerHTML=cols.map(c=>`<th${c.s?` onclick="doS('${c.k}')"`:''}class="${c.c||''}">${c.l}${c.s?ar(c.k):''}</th>`).join('');
-  document.getElementById('tbody').innerHTML=page.map((r,i)=>{
-    const fc=r.fg<=-30?'z0':r.fg<=-15?'z1':r.fg<=-5?'z2':r.fg<=5?'z3':r.fg<=15?'z4':r.fg<=30?'z5':'z6';
-    const sw=r.swing==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.swing==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.swing==='EXIT ZONE'?'<span class="sw sw-x">EXIT</span>':r.swing==='TAKE PROFIT'?'<span class="sw sw-p">PROFIT</span>':'';
-    const pr=r.price>=1?'$'+r.price.toFixed(2):r.price>0.001?'$'+r.price.toFixed(4):'$'+r.price.toExponential(2);
-    return`<tr><td>${i+1}</td><td class="sym">${r.symbol}</td><td class="hm">${pr}</td><td class="hm mcap">${fmt$(r.mcap)}</td><td><span class="fg-b ${fc}">${r.fg>0?'+':''}${r.fg.toFixed(1)}</span></td><td>${r.zone}</td><td class="hm">${r.category}</td><td>${sw}</td><td class="hm" style="color:#848e9c">T${r.tier}</td></tr>`;
+  document.getElementById('thead').innerHTML=cols.map(c=>{
+    const isActive=c.k===tfKey;
+    const bold=isActive?'font-weight:700;color:#f0b90b':'';
+    return`<th${c.s?` onclick="doS('${c.k}')"`:''}class="${c.c||''}"style="${bold}">${c.l}${c.s?ar(c.k):''}</th>`;
   }).join('');
-  document.getElementById('pageBar').innerHTML=`<span>${page.length} of ${rows.length}</span><span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:10px;padding:2px 7px" onclick="pSz=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
+
+  document.getElementById('tbody').innerHTML=page.map((r,i)=>{
+    const activeFG=fgForTF(r);
+    const zn=activeFG!=null?(activeFG<=-30?'EXTREME FEAR':activeFG<=-15?'FEAR':activeFG<=-5?'WEAK FEAR':activeFG<=5?'NEUTRAL':activeFG<=15?'WEAK GREED':activeFG<=30?'GREED':'EXTREME GREED'):'—';
+    const sw=r.swing==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.swing==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.swing==='EXIT ZONE'?'<span class="sw sw-x">EXIT</span>':r.swing==='TAKE PROFIT'?'<span class="sw sw-p">PROFIT</span>':'';
+    const pr=r.price>=1?'$'+r.price.toFixed(2):r.price>0.001?'$'+r.price.toFixed(4):r.price>0?'$'+r.price.toExponential(2):'—';
+    // Highlight active TF column
+    const hl=k=>k===tfKey?'font-weight:700':'';
+    return`<tr>
+      <td>${i+1}</td><td class="sym">${r.symbol}</td><td class="hm">${pr}</td><td class="hm mcap">${fmt$(r.mcap)}</td>
+      <td class="hm" style="${hl('fg_15m')}">${fgBadge(r.fg_15m)}</td>
+      <td class="hm" style="${hl('fg_1H')}">${fgBadge(r.fg_1H)}</td>
+      <td class="hm" style="${hl('fg_4H')}">${fgBadge(r.fg_4H)}</td>
+      <td style="${hl('fg_D')}">${fgBadge(r.fg_D)}</td>
+      <td class="hm" style="${hl('fg_W')}">${fgBadge(r.fg_W)}</td>
+      <td>${zn}</td><td>${sw}</td></tr>`;
+  }).join('');
+
+  document.getElementById('pageBar').innerHTML=`<span>Showing ${page.length} of ${rows.length}</span><span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:10px;padding:2px 7px" onclick="pSz=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
 }
 
 function applyFiltersToRows(rows){
@@ -456,7 +513,13 @@ function getF(){
   return r;
 }
 
-function switchTF(tf){cTF=tf;loadData(tf)}
+function switchTF(tf){
+  cTF=tf;
+  sCol={D:'fg_D','15':'fg_15m','60':'fg_1H','240':'fg_4H',W:'fg_W'}[tf]||'fg_D';
+  sDir=1;
+  D.tf=TFS.find(t=>t.k===tf)?.l||'Daily';
+  render(); // Client-side re-render, no API call
+}
 function switchCat(c){cCat=c||null;loadData(cTF)}
 function doS(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='fg'||c==='mcap'?1:-1}renderTable()}
 
