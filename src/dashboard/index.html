@@ -5,98 +5,75 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>F&G Scanner — Fear & Greed Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0e11;color:#eaecef}
-a{color:#f0b90b;text-decoration:none}
 
-/* Header */
 .header{background:#181a20;border-bottom:1px solid #2b2f36;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .header h1{font-size:20px;color:#eaecef;font-weight:700}
 .header h1 span{color:#f0b90b}
 .header-meta{font-size:12px;color:#848e9c}
-.header-actions{display:flex;gap:8px;align-items:center}
-
-/* Buttons */
 .btn{background:#2b2f36;border:1px solid #363a45;color:#eaecef;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;transition:.15s}
-.btn:hover{background:#363a45;border-color:#5e6673}
+.btn:hover{background:#363a45}
 .btn.active{background:#f0b90b;border-color:#f0b90b;color:#181a20;font-weight:600}
 .btn-refresh{background:#0ecb81;border-color:#0ecb81;color:#181a20;font-weight:600}
 
-/* Layout */
 .main{display:flex;gap:0;flex-wrap:wrap}
-.sidebar{width:280px;min-width:260px;padding:16px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2b2f36;background:#181a20}
+.sidebar{width:260px;padding:16px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2b2f36;background:#181a20}
 .chart-area{flex:1;min-width:0;position:relative}
-.chart-container{position:relative;height:480px;background:#181a20;border-bottom:1px solid #2b2f36}
+.chart-container{position:relative;height:500px;background:#181a20;border-bottom:1px solid #2b2f36}
 .chart-container canvas{position:absolute;top:0;left:0}
 
-/* Cards */
-.card{background:#1e2329;border:1px solid #2b2f36;border-radius:8px;padding:16px}
-.card-title{font-size:12px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-.card-value{font-size:36px;font-weight:700}
-.card-bar{height:6px;border-radius:3px;margin-top:10px;position:relative;overflow:hidden}
+.card{background:#1e2329;border:1px solid #2b2f36;border-radius:8px;padding:14px}
+.card-title{font-size:11px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.card-value{font-size:34px;font-weight:700}
+.card-bar{height:6px;border-radius:3px;margin-top:8px;position:relative;overflow:hidden}
 .card-bar-bg{position:absolute;inset:0;background:linear-gradient(to right,#0ecb81,#f0b90b,#f6465d)}
 .card-bar-thumb{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #181a20;transform:translateX(-50%)}
-.card-labels{display:flex;justify-content:space-between;font-size:11px;color:#848e9c;margin-top:4px}
-.card-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2b2f36;font-size:13px}
+.card-labels{display:flex;justify-content:space-between;font-size:10px;color:#848e9c;margin-top:3px}
+.card-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #2b2f36;font-size:12px}
 .card-row:last-child{border:none}
-.dot-green{display:inline-block;width:8px;height:8px;border-radius:50%;background:#0ecb81;margin-right:6px}
-.dot-red{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f6465d;margin-right:6px}
-.dot-grey{display:inline-block;width:8px;height:8px;border-radius:50%;background:#848e9c;margin-right:6px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
 
-/* TF bar */
-.tf-bar{position:absolute;top:12px;right:16px;z-index:10;display:flex;gap:4px}
-.tf-bar .btn{font-size:11px;padding:4px 10px}
+.tf-bar{position:absolute;top:10px;right:14px;z-index:10;display:flex;gap:3px}
+.tf-bar .btn{font-size:11px;padding:3px 9px}
 
-/* Category tabs */
-.cat-tabs{display:flex;gap:4px;padding:10px 24px;background:#0b0e11;overflow-x:auto;border-bottom:1px solid #2b2f36}
-.cat-tabs .btn{font-size:11px;padding:4px 10px;white-space:nowrap}
+.cat-tabs{display:flex;gap:3px;padding:8px 24px;background:#0b0e11;overflow-x:auto;border-bottom:1px solid #2b2f36}
+.cat-tabs .btn{font-size:11px;padding:3px 9px;white-space:nowrap}
 .cat-tabs .cnt{color:#848e9c;margin-left:3px;font-size:10px}
 
-/* Search + filters */
-.filters-bar{display:flex;gap:12px;padding:10px 24px;align-items:center;flex-wrap:wrap}
-.filters-bar input{background:#1e2329;border:1px solid #2b2f36;color:#eaecef;padding:8px 12px;border-radius:4px;font-size:13px;width:200px}
-.filters-bar label{font-size:12px;color:#848e9c}
+.filters-bar{display:flex;gap:12px;padding:8px 24px;align-items:center;flex-wrap:wrap}
+.filters-bar input[type=text]{background:#1e2329;border:1px solid #2b2f36;color:#eaecef;padding:7px 12px;border-radius:4px;font-size:13px;width:200px}
+.filters-bar label{font-size:12px;color:#848e9c;cursor:pointer}
 
-/* Table */
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-thead th{background:#181a20;color:#848e9c;text-align:left;padding:10px 12px;cursor:pointer;white-space:nowrap;border-bottom:1px solid #2b2f36;position:sticky;top:0;z-index:1;font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+thead th{background:#181a20;color:#848e9c;text-align:left;padding:8px 12px;cursor:pointer;white-space:nowrap;border-bottom:1px solid #2b2f36;position:sticky;top:0;z-index:1;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.3px}
 thead th:hover{color:#eaecef}
 tbody tr{border-bottom:1px solid #1e2329}
-tbody tr:hover{background:#1e2329}
-td{padding:8px 12px;white-space:nowrap}
-.sym-name{font-weight:600;color:#eaecef}
-.fg-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:600;font-size:12px;min-width:52px;text-align:center;color:#fff}
-.fg-ef{background:#910000}.fg-f{background:#d32f2f}.fg-wf{background:#e65100}
-.fg-n{background:#474d57}.fg-wg{background:#00796b}.fg-g{background:#2e7d32}.fg-eg{background:#1b5e20}
-.swing-badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
-.sw-entry{background:#0ecb81;color:#181a20;animation:pulse 2s infinite}
-.sw-watch{background:#f0b90b;color:#181a20}
-.sw-exit{background:#f6465d;color:#fff}
-.sw-profit{background:#f6465d;color:#fff;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-.pct-pos{color:#0ecb81}.pct-neg{color:#f6465d}
-.page-bar{padding:8px 24px;display:flex;justify-content:space-between;font-size:12px;color:#848e9c;align-items:center;flex-wrap:wrap;gap:8px}
-
-@media(max-width:900px){
-  .sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}
-  .sidebar .card{min-width:200px}
-  .chart-container{height:350px}
-  .hide-m{display:none}
-}
+tbody tr:hover{background:#161b22}
+td{padding:6px 12px;white-space:nowrap}
+.sym{font-weight:600;color:#eaecef}
+.fg-b{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:600;font-size:12px;min-width:52px;text-align:center;color:#fff}
+.z0{background:#910000}.z1{background:#d32f2f}.z2{background:#e65100}.z3{background:#474d57}.z4{background:#00796b}.z5{background:#2e7d32}.z6{background:#1b5e20}
+.sw{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+.sw-e{background:#0ecb81;color:#181a20;animation:pulse 2s infinite}
+.sw-w{background:#f0b90b;color:#181a20}
+.sw-x{background:#f6465d;color:#fff}
+.sw-p{background:#f6465d;color:#fff;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.pct-p{color:#0ecb81}.pct-n{color:#f6465d}
+.page-bar{padding:6px 24px;display:flex;justify-content:space-between;font-size:11px;color:#848e9c;align-items:center}
+.mcap{color:#848e9c;font-size:12px}
+@media(max-width:900px){.sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}.sidebar .card{min-width:180px}.chart-container{height:320px}.hm{display:none}}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div>
-    <h1>F&G <span>Scanner</span></h1>
-    <div class="header-meta" id="meta">Loading...</div>
-  </div>
-  <div class="header-actions">
-    <button class="btn btn-refresh" onclick="refresh()">⟳ Refresh</button>
-  </div>
+  <div><h1>F&G <span>Scanner</span></h1><div class="header-meta" id="meta">Loading...</div></div>
+  <div><button class="btn btn-refresh" onclick="refresh()">⟳ Refresh</button></div>
 </div>
 
 <div class="main">
@@ -110,185 +87,153 @@ td{padding:8px 12px;white-space:nowrap}
 </div>
 
 <div class="cat-tabs" id="catTabs"></div>
-
 <div class="filters-bar">
   <input type="text" id="search" placeholder="Search symbol..." oninput="renderTable()">
   <label><input type="checkbox" id="fearOnly" onchange="renderTable()"> Fear only</label>
 </div>
-
-<div class="table-wrap">
-  <table>
-    <thead><tr id="thead"></tr></thead>
-    <tbody id="tbody"></tbody>
-  </table>
-</div>
+<div class="table-wrap"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div class="page-bar" id="pageBar"></div>
 
 <script>
-let DATA=null, chart=null, currentTF='D', currentCat=null, sortCol='fg', sortDir=1, pageSize=100;
+Chart.register(ChartDataLabels);
+
+let D=null,chart=null,cTF='D',cCat=null,sCol='fg',sDir=1,pSz=100;
 const TFS=[{k:'D',l:'Daily'},{k:'15',l:'15m'},{k:'60',l:'1H'},{k:'240',l:'4H'},{k:'W',l:'Weekly'}];
 
-async function loadData(tf){
-  const cat=currentCat?'&category='+encodeURIComponent(currentCat):'';
-  const res=await fetch('/api/cached?tf='+tf+cat);
-  DATA=await res.json();
-  render();
-}
+function fmt$(v){if(v>=1e12)return'$'+(v/1e12).toFixed(1)+'T';if(v>=1e9)return'$'+(v/1e9).toFixed(1)+'B';if(v>=1e6)return'$'+(v/1e6).toFixed(0)+'M';return'$'+Math.round(v)}
 
-async function refresh(){document.getElementById('meta').textContent='Refreshing...';await loadData(currentTF)}
+async function loadData(tf){const c=cCat?'&category='+encodeURIComponent(cCat):'';const r=await fetch('/api/cached?tf='+tf+c);D=await r.json();render()}
+async function refresh(){document.getElementById('meta').textContent='Refreshing...';await loadData(cTF)}
 
 function render(){
-  if(!DATA)return;
-  document.getElementById('meta').textContent=
-    DATA.total.toLocaleString()+' symbols · '+DATA.tf+' · '+new Date(DATA.updated).toLocaleString();
-
-  renderSidebar();
-  renderTFBar();
-  renderCatTabs();
-  renderScatter();
-  renderTable();
+  if(!D)return;
+  document.getElementById('meta').textContent=D.total.toLocaleString()+' symbols · '+D.tf+' · '+new Date(D.updated).toLocaleString();
+  renderSidebar();renderTFBar();renderCatTabs();renderScatter();renderTable();
 }
 
 function renderSidebar(){
-  const pctFear=DATA.total>0?Math.round(DATA.rows.filter(r=>r.fg<=-5).length/DATA.total*100):0;
-  const pctGreed=DATA.total>0?Math.round(DATA.rows.filter(r=>r.fg>=5).length/DATA.total*100):0;
-  const thumbPos=Math.max(0,Math.min(100,(DATA.avgFG+50)/100*100));
-  const avgColor=DATA.avgFG<=-15?'#f6465d':DATA.avgFG<=-5?'#e65100':DATA.avgFG>=15?'#0ecb81':DATA.avgFG>=5?'#2e7d32':'#848e9c';
-
+  const pF=D.total>0?Math.round(D.rows.filter(r=>r.fg<=-5).length/D.total*100):0;
+  const pG=D.total>0?Math.round(D.rows.filter(r=>r.fg>=5).length/D.total*100):0;
+  const tp=Math.max(0,Math.min(100,(D.avgFG+50)/100*100));
+  const ac=D.avgFG<=-15?'#f6465d':D.avgFG<=-5?'#e65100':D.avgFG>=15?'#0ecb81':D.avgFG>=5?'#2e7d32':'#848e9c';
+  const entries=D.rows.filter(r=>r.swing==='ENTRY ZONE').length;
   document.getElementById('sidebar').innerHTML=`
-    <div class="card">
-      <div class="card-title">Average F&G Score (${DATA.tf})</div>
-      <div class="card-value" style="color:${avgColor}">${DATA.avgFG>0?'+':''}${DATA.avgFG}</div>
-      <div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-thumb" style="left:${thumbPos}%"></div></div>
-      <div class="card-labels"><span>Fear</span><span>Greed</span></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Fear vs Greed</div>
-      <div class="card-row"><span><span class="dot-green"></span>In Fear</span><span style="color:#0ecb81;font-weight:600">${pctFear}%</span></div>
-      <div class="card-row"><span><span class="dot-grey"></span>Neutral</span><span>${100-pctFear-pctGreed}%</span></div>
-      <div class="card-row"><span><span class="dot-red"></span>In Greed</span><span style="color:#f6465d;font-weight:600">${pctGreed}%</span></div>
-      <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:8px">
-        <div style="width:${pctFear}%;background:#0ecb81"></div>
-        <div style="width:${100-pctFear-pctGreed}%;background:#474d57"></div>
-        <div style="width:${pctGreed}%;background:#f6465d"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Oversold / Overbought</div>
-      <div class="card-row"><span>Oversold (F&G < -25)</span><span style="color:#0ecb81">${DATA.oversold}</span></div>
-      <div class="card-row"><span>Overbought (F&G > +25)</span><span style="color:#f6465d">${DATA.overbought}</span></div>
-      <div class="card-row"><span>Entry Zone signals</span><span style="color:#f0b90b">${DATA.rows.filter(r=>r.swing==='ENTRY ZONE').length}</span></div>
-    </div>`;
+    <div class="card"><div class="card-title">Average F&G (${D.tf})</div>
+      <div class="card-value" style="color:${ac}">${D.avgFG>0?'+':''}${D.avgFG}</div>
+      <div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-thumb" style="left:${tp}%"></div></div>
+      <div class="card-labels"><span>Fear</span><span>Greed</span></div></div>
+    <div class="card"><div class="card-title">Fear vs Greed</div>
+      <div class="card-row"><span><span class="dot" style="background:#0ecb81"></span>In Fear</span><span style="color:#0ecb81;font-weight:600">${pF}%</span></div>
+      <div class="card-row"><span><span class="dot" style="background:#848e9c"></span>Neutral</span><span>${100-pF-pG}%</span></div>
+      <div class="card-row"><span><span class="dot" style="background:#f6465d"></span>In Greed</span><span style="color:#f6465d;font-weight:600">${pG}%</span></div>
+      <div style="display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:6px">
+        <div style="width:${pF}%;background:#0ecb81"></div><div style="width:${100-pF-pG}%;background:#474d57"></div><div style="width:${pG}%;background:#f6465d"></div></div></div>
+    <div class="card"><div class="card-title">Signals</div>
+      <div class="card-row"><span>Oversold (&lt;-25)</span><span style="color:#0ecb81">${D.oversold}</span></div>
+      <div class="card-row"><span>Overbought (&gt;+25)</span><span style="color:#f6465d">${D.overbought}</span></div>
+      <div class="card-row"><span>Entry Zone</span><span style="color:#f0b90b;font-weight:600">${entries}</span></div></div>`;
 }
 
-function renderTFBar(){
-  document.getElementById('tfBar').innerHTML=TFS.map(t=>`<button class="btn ${t.k===currentTF?'active':''}" onclick="switchTF('${t.k}')">${t.l}</button>`).join('');
-}
+function renderTFBar(){document.getElementById('tfBar').innerHTML=TFS.map(t=>`<button class="btn ${t.k===cTF?'active':''}" onclick="switchTF('${t.k}')">${t.l}</button>`).join('')}
 
 function renderCatTabs(){
-  const all=[{name:'All',count:DATA.total},...DATA.categories.map(c=>({name:c.name,count:c.count,avg:c.avg}))];
+  const all=[{name:'All',count:D.total},...D.categories.map(c=>({name:c.name,count:c.count}))];
   document.getElementById('catTabs').innerHTML=all.map(c=>{
-    const active=(c.name==='All'&&!currentCat)||c.name===currentCat;
-    return`<button class="btn ${active?'active':''}" onclick="switchCat('${c.name==='All'?'':c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
+    const a=(c.name==='All'&&!cCat)||c.name===cCat;
+    return`<button class="btn ${a?'active':''}" onclick="switchCat('${c.name==='All'?'':c.name}')">${c.name}<span class="cnt">${c.count}</span></button>`;
   }).join('');
 }
 
 function renderScatter(){
   const canvas=document.getElementById('scatter');
-  const container=canvas.parentElement;
-  canvas.width=container.clientWidth;
-  canvas.height=container.clientHeight;
+  const ct=canvas.parentElement;
+  canvas.width=ct.clientWidth;canvas.height=ct.clientHeight;
 
-  // Prepare data points — sample max 500 for performance, prefer extremes
-  let pts=[...DATA.rows];
-  if(pts.length>500){
-    const extreme=pts.filter(r=>Math.abs(r.fg)>15).slice(0,250);
-    const rest=pts.filter(r=>Math.abs(r.fg)<=15);
-    const sample=rest.sort(()=>Math.random()-.5).slice(0,250);
-    pts=[...extreme,...sample];
+  // Select points: all with mcap, sample to max 600
+  let pts=D.rows.filter(r=>r.mcap>0);
+  if(pts.length>600){
+    const ext=pts.filter(r=>Math.abs(r.fg)>15).slice(0,300);
+    const rest=pts.filter(r=>Math.abs(r.fg)<=15).sort(()=>Math.random()-.5).slice(0,300);
+    pts=[...ext,...rest];
   }
 
-  const data=pts.map(r=>({
-    x:Math.max(1,r.fg),
-    y:r.fg,
-    label:r.symbol,
-    fg:r.fg,
-    cat:r.category,
-    swing:r.swing,
-  }));
+  // Show labels only for largest/most extreme (top 40 by mcap or extreme fg)
+  const byMcap=[...pts].sort((a,b)=>b.mcap-a.mcap);
+  const labelSet=new Set();
+  byMcap.slice(0,20).forEach(p=>labelSet.add(p.symbol));
+  pts.filter(r=>Math.abs(r.fg)>30).slice(0,20).forEach(p=>labelSet.add(p.symbol));
 
-  // Assign x = index (spread across width) sorted by fg
-  data.sort((a,b)=>a.fg-b.fg);
-  data.forEach((d,i)=>{d.x=i});
+  const data=pts.map(r=>({
+    x:r.mcap,y:r.fg,label:r.symbol,cat:r.category,swing:r.swing,price:r.price,showLabel:labelSet.has(r.symbol)
+  }));
 
   if(chart)chart.destroy();
 
   chart=new Chart(canvas,{
     type:'scatter',
-    data:{
-      datasets:[{
-        data:data.map(d=>({x:d.x,y:d.y})),
-        pointBackgroundColor:data.map(d=>d.fg<=-25?'#0ecb81':d.fg<=-10?'#26a17b':d.fg>=25?'#f6465d':d.fg>=10?'#cf304a':'#848e9c'),
-        pointBorderColor:'transparent',
-        pointRadius:data.map(d=>d.swing==='ENTRY ZONE'?5:3),
-        pointHoverRadius:7,
-      }]
-    },
+    data:{datasets:[{
+      data:data.map(d=>({x:d.x,y:d.y})),
+      pointBackgroundColor:data.map(d=>d.y<=-25?'#0ecb81':d.y<=-10?'#26a17b':d.y>=25?'#f6465d':d.y>=10?'#cf304a':'#848e9c'),
+      pointBorderColor:'transparent',
+      pointRadius:data.map(d=>d.swing==='ENTRY ZONE'?6:d.showLabel?4:2.5),
+      pointHoverRadius:8,
+      datalabels:{
+        display:ctx=>data[ctx.dataIndex].showLabel,
+        color:'#eaecef',
+        font:{size:10,weight:'bold'},
+        anchor:'end',align:'top',offset:2,
+        formatter:(v,ctx)=>data[ctx.dataIndex].label,
+        textStrokeColor:'#0b0e11',textStrokeWidth:2,
+      }
+    }]},
     options:{
-      responsive:false,
-      maintainAspectRatio:false,
+      responsive:false,maintainAspectRatio:false,
       plugins:{
         legend:{display:false},
         tooltip:{
           callbacks:{
-            label:function(ctx){
-              const d=data[ctx.dataIndex];
-              return `${d.label}: F&G ${d.fg>0?'+':''}${d.fg.toFixed(1)} · ${d.cat}${d.swing?' · '+d.swing:''}`;
+            title:ctx=>{const d2=data[ctx[0].dataIndex];return d2.label},
+            label:ctx=>{
+              const d2=data[ctx.dataIndex];
+              return[
+                'F&G: '+(d2.y>0?'+':'')+d2.y.toFixed(1),
+                'Market Cap: '+fmt$(d2.x),
+                d2.cat,
+                d2.swing||''
+              ].filter(Boolean);
             }
           },
-          backgroundColor:'#1e2329',borderColor:'#2b2f36',borderWidth:1,titleColor:'#eaecef',bodyColor:'#eaecef',
+          backgroundColor:'#1e2329',borderColor:'#2b2f36',borderWidth:1,titleColor:'#f0b90b',bodyColor:'#eaecef',
         },
       },
       scales:{
-        x:{display:false},
+        x:{
+          type:'logarithmic',reverse:true,
+          min:1e7,max:3e12,
+          grid:{color:'#1e232980'},
+          ticks:{color:'#848e9c',callback:v=>fmt$(v),maxTicksLimit:8},
+          title:{display:true,text:'Market Cap',color:'#848e9c'},
+        },
         y:{
           min:-45,max:45,
-          grid:{color:'#1e2329'},
-          ticks:{color:'#848e9c',callback:v=>v>0?'+'+v:v},
-          title:{display:true,text:'F&G Score',color:'#848e9c'},
+          grid:{color:'#1e232960'},
+          ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},
+          title:{display:true,text:'F&G Score ('+D.tf+')',color:'#848e9c'},
         }
       }
     },
     plugins:[{
       id:'bgZones',
       beforeDraw(ch){
-        const ctx=ch.ctx;
-        const{top,bottom,left,right}=ch.chartArea;
-        const yScale=ch.scales.y;
+        const ctx=ch.ctx;const{top,bottom,left,right}=ch.chartArea;const yS=ch.scales.y;
         const zones=[
-          {from:30,to:45,color:'rgba(145,0,0,0.25)'},
-          {from:15,to:30,color:'rgba(246,70,93,0.15)'},
-          {from:5,to:15,color:'rgba(246,70,93,0.07)'},
-          {from:-5,to:5,color:'rgba(71,77,87,0.15)'},
-          {from:-15,to:-5,color:'rgba(14,203,129,0.07)'},
-          {from:-30,to:-15,color:'rgba(14,203,129,0.15)'},
-          {from:-45,to:-30,color:'rgba(14,203,129,0.25)'},
+          [30,45,'rgba(145,0,0,0.3)'],[15,30,'rgba(246,70,93,0.15)'],[5,15,'rgba(246,70,93,0.06)'],
+          [-5,5,'rgba(71,77,87,0.12)'],[-15,-5,'rgba(14,203,129,0.06)'],[-30,-15,'rgba(14,203,129,0.15)'],[-45,-30,'rgba(14,203,129,0.3)']
         ];
-        for(const z of zones){
-          const y1=yScale.getPixelForValue(z.to);
-          const y2=yScale.getPixelForValue(z.from);
-          ctx.fillStyle=z.color;
-          ctx.fillRect(left,y1,right-left,y2-y1);
-        }
-        // Zone labels
-        ctx.fillStyle='rgba(234,236,239,0.3)';
-        ctx.font='11px -apple-system,sans-serif';
-        ctx.textAlign='left';
-        const labels=[
-          [35,'EXTREME GREED'],[22,'GREED'],[10,'WEAK GREED'],[0,'NEUTRAL'],[-10,'WEAK FEAR'],[-22,'FEAR'],[-37,'EXTREME FEAR']
-        ];
-        for(const[y,txt]of labels){
-          ctx.fillText(txt,left+8,yScale.getPixelForValue(y)+4);
+        for(const[f,t,c]of zones){const y1=yS.getPixelForValue(t),y2=yS.getPixelForValue(f);ctx.fillStyle=c;ctx.fillRect(left,y1,right-left,y2-y1)}
+        ctx.fillStyle='rgba(234,236,239,0.2)';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';
+        for(const[y,txt]of[[37,'EXTREME GREED'],[22,'GREED'],[0,'NEUTRAL'],[-22,'FEAR'],[-37,'EXTREME FEAR']]){
+          ctx.fillText(txt,right-6,yS.getPixelForValue(y)+4);
         }
       }
     }]
@@ -296,58 +241,37 @@ function renderScatter(){
 }
 
 function renderTable(){
-  const rows=getFiltered();
-  const page=rows.slice(0,pageSize);
+  const rows=getF();const page=rows.slice(0,pSz);
   const cols=[
-    {k:'#',l:'#',s:false},{k:'symbol',l:'Symbol',s:true},{k:'fg',l:'F&G ('+DATA.tf+')',s:true},
-    {k:'zone',l:'Zone',s:false},{k:'category',l:'Category',s:true,cls:'hide-m'},
-    {k:'swing',l:'Swing',s:false},{k:'tier',l:'Tier',s:true,cls:'hide-m'},
-    {k:'rsi',l:'RSI',s:true,cls:'hide-m'},
+    {k:'#',l:'#'},{k:'symbol',l:'Symbol',s:1},{k:'price',l:'Price',s:1,c:'hm'},{k:'mcap',l:'Market Cap',s:1,c:'hm'},
+    {k:'fg',l:'F&G ('+D.tf+')',s:1},{k:'zone',l:'Zone'},{k:'category',l:'Category',s:1,c:'hm'},
+    {k:'swing',l:'Swing'},{k:'tier',l:'Tier',s:1,c:'hm'}
   ];
-  const arrow=k=>sortCol===k?(sortDir===1?' ▲':' ▼'):'';
-  document.getElementById('thead').innerHTML=cols.map(c=>`<th${c.s?` onclick="doSort('${c.k}')"`:''}class="${c.cls||''}">${c.l}${c.s?arrow(c.k):''}</th>`).join('');
-
+  const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
+  document.getElementById('thead').innerHTML=cols.map(c=>`<th${c.s?` onclick="doS('${c.k}')"`:''}class="${c.c||''}">${c.l}${c.s?ar(c.k):''}</th>`).join('');
   document.getElementById('tbody').innerHTML=page.map((r,i)=>{
-    const fc=r.fg<=-30?'fg-ef':r.fg<=-15?'fg-f':r.fg<=-5?'fg-wf':r.fg<=5?'fg-n':r.fg<=15?'fg-wg':r.fg<=30?'fg-g':'fg-eg';
-    const sw=r.swing==='ENTRY ZONE'?'<span class="swing-badge sw-entry">ENTRY ZONE</span>':
-      r.swing==='WATCHING'?'<span class="swing-badge sw-watch">WATCHING</span>':
-      r.swing==='EXIT ZONE'?'<span class="swing-badge sw-exit">EXIT ZONE</span>':
-      r.swing==='TAKE PROFIT'?'<span class="swing-badge sw-profit">TAKE PROFIT</span>':'';
-    return`<tr>
-      <td>${i+1}</td>
-      <td class="sym-name">${r.symbol}</td>
-      <td><span class="fg-badge ${fc}">${r.fg>0?'+':''}${r.fg.toFixed(1)}</span></td>
-      <td>${r.zone}</td>
-      <td class="hide-m">${r.category}</td>
-      <td>${sw}</td>
-      <td class="hide-m" style="color:#848e9c">T${r.tier}</td>
-      <td class="hide-m">${r.rsi!=null?r.rsi.toFixed(1):'—'}</td>
-    </tr>`;
+    const fc=r.fg<=-30?'z0':r.fg<=-15?'z1':r.fg<=-5?'z2':r.fg<=5?'z3':r.fg<=15?'z4':r.fg<=30?'z5':'z6';
+    const sw=r.swing==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.swing==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.swing==='EXIT ZONE'?'<span class="sw sw-x">EXIT</span>':r.swing==='TAKE PROFIT'?'<span class="sw sw-p">PROFIT</span>':'';
+    const pr=r.price>=1?'$'+r.price.toFixed(2):r.price>0.001?'$'+r.price.toFixed(4):'$'+r.price.toExponential(2);
+    return`<tr><td>${i+1}</td><td class="sym">${r.symbol}</td><td class="hm">${pr}</td><td class="hm mcap">${fmt$(r.mcap)}</td><td><span class="fg-b ${fc}">${r.fg>0?'+':''}${r.fg.toFixed(1)}</span></td><td>${r.zone}</td><td class="hm">${r.category}</td><td>${sw}</td><td class="hm" style="color:#848e9c">T${r.tier}</td></tr>`;
   }).join('');
-
-  document.getElementById('pageBar').innerHTML=`
-    <span>Showing ${page.length} of ${rows.length}</span>
-    <span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="pageSize=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
+  document.getElementById('pageBar').innerHTML=`<span>${page.length} of ${rows.length}</span><span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:10px;padding:2px 7px" onclick="pSz=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
 }
 
-function getFiltered(){
-  let rows=DATA?[...DATA.rows]:[];
+function getF(){
+  let r=D?[...D.rows]:[];
   const q=document.getElementById('search').value.toUpperCase();
-  if(q)rows=rows.filter(r=>r.symbol.includes(q));
-  if(document.getElementById('fearOnly').checked)rows=rows.filter(r=>r.fg<=-5);
-  rows.sort((a,b)=>{
-    let va=a[sortCol],vb=b[sortCol];
-    if(typeof va==='string')return va.localeCompare(vb)*sortDir;
-    return((va??0)-(vb??0))*sortDir;
-  });
-  return rows;
+  if(q)r=r.filter(x=>x.symbol.includes(q));
+  if(document.getElementById('fearOnly').checked)r=r.filter(x=>x.fg<=-5);
+  r.sort((a,b)=>{let va=a[sCol],vb=b[sCol];if(typeof va==='string')return va.localeCompare(vb)*sDir;return((va??0)-(vb??0))*sDir});
+  return r;
 }
 
-function switchTF(tf){currentTF=tf;loadData(tf)}
-function switchCat(c){currentCat=c||null;loadData(currentTF)}
-function doSort(c){if(sortCol===c)sortDir*=-1;else{sortCol=c;sortDir=c==='fg'?1:-1}renderTable()}
+function switchTF(tf){cTF=tf;loadData(tf)}
+function switchCat(c){cCat=c||null;loadData(cTF)}
+function doS(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='fg'||c==='mcap'?1:-1}renderTable()}
 
-window.addEventListener('resize',()=>{if(DATA)renderScatter()});
+window.addEventListener('resize',()=>{if(D)renderScatter()});
 loadData('D');
 </script>
 </body>

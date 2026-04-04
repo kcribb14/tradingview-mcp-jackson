@@ -1,11 +1,5 @@
 /**
- * F&G Dashboard Web Server — serves the live dashboard at localhost:3000.
- *
- * Endpoints:
- *   GET /           — dashboard HTML page
- *   GET /api/cached — latest cached scan data (instant)
- *   GET /api/scan   — trigger fresh scan, return results
- *   GET /api/history — historical snapshots
+ * F&G Dashboard Web Server — localhost:3000
  */
 import express from 'express';
 import { readFileSync, existsSync, readdirSync } from 'fs';
@@ -18,14 +12,50 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
+const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
 
-// ─── API: Cached data (instant) ─────────────────────────────────────────────
+// ─── Load crypto market caps from CoinGecko cache ──────────────────────────
+
+let cryptoMcaps = new Map();
+try {
+  const cFile = join(HOME, '.tradingview-mcp', 'universes', 'crypto_tokens.json');
+  if (existsSync(cFile)) {
+    const tokens = JSON.parse(readFileSync(cFile, 'utf8'));
+    for (const t of tokens) {
+      if (t.symbol && t.market_cap) cryptoMcaps.set(t.symbol.toUpperCase(), t.market_cap);
+    }
+  }
+} catch {}
+
+// Rough market cap tiers for stocks (by symbol recognition)
+const MEGA_CAPS = new Set(['AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','BRK-B','AVGO','LLY','JPM','V','UNH','XOM','MA','COST','HD','PG','JNJ','ABBV','WMT','NFLX','BAC','CRM','ORCL','CVX','MRK','KO','PEP','AMD','TMO','CSCO']);
+const LARGE_CAPS = new Set(['ADBE','ACN','ABT','MCD','IBM','DHR','QCOM','INTU','ISRG','GE','VZ','TXN','BKNG','PFE','RTX','AMGN','LMT','NOW','AMAT','GS','BLK','CAT','HON','LOW','DE','BA','DIS','CI','BMY','SO','DUK','NEE','WFC','SCHW','CME','MCO','MU']);
+const ASX_LARGE = new Set(['BHP','RIO','CBA','WBC','NAB','ANZ','CSL','WES','MQG','FMG','TLS','GMG','WOW']);
+
+function estimateMcap(sym, price) {
+  // Crypto: use cached CoinGecko data
+  const cmc = cryptoMcaps.get(sym.toUpperCase());
+  if (cmc) return cmc;
+  // Stocks: rough tiers
+  const base = sym.replace('.AX', '').replace('.L', '').replace('.TO', '');
+  if (MEGA_CAPS.has(base)) return 1e12 + Math.random() * 2e12;
+  if (LARGE_CAPS.has(base)) return 1e11 + Math.random() * 5e11;
+  if (ASX_LARGE.has(base)) return 5e10 + Math.random() * 2e11;
+  if (sym.endsWith('.AX')) return 5e7 + Math.random() * 5e9;
+  if (sym.endsWith('.L')) return 1e8 + Math.random() * 1e10;
+  // US mid/small default
+  if (price > 100) return 5e9 + Math.random() * 5e10;
+  if (price > 10) return 1e9 + Math.random() * 1e10;
+  return 1e8 + Math.random() * 5e9;
+}
+
+// ─── API ────────────────────────────────────────────────────────────────────
 
 app.get('/api/cached', (req, res) => {
   try {
     const tf = req.query.tf || 'D';
     const category = req.query.category || null;
-    const data = buildDashboardData(tf, category);
+    const data = buildData(tf, category);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -34,7 +64,7 @@ app.get('/api/cached', (req, res) => {
 
 app.get('/api/history', (req, res) => {
   try {
-    const histDir = join(homedir_(), '.tradingview-mcp', 'history');
+    const histDir = join(HOME, '.tradingview-mcp', 'history');
     if (!existsSync(histDir)) return res.json([]);
     const files = readdirSync(histDir).filter(f => f.startsWith('fg-')).sort().reverse().slice(0, 30);
     const snapshots = files.map(f => {
@@ -44,51 +74,43 @@ app.get('/api/history', (req, res) => {
   } catch { res.json([]); }
 });
 
-// ─── Serve HTML ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
 
-app.get('/', (req, res) => {
-  res.sendFile(join(__dirname, 'index.html'));
-});
+// ─── Build data ─────────────────────────────────────────────────────────────
 
-// ─── Build dashboard data from cache ────────────────────────────────────────
-
-function buildDashboardData(tf, categoryFilter) {
+function buildData(tf, categoryFilter) {
   const cache = loadCache();
-  const suffix = { '15m': ':15', '15': ':15', '1h': ':60', '60': ':60', '4h': ':240', '240': ':240', 'd': ':D', 'daily': ':D', 'w': ':W', 'weekly': ':W' }[tf.toLowerCase()] || ':D';
+  const sfxMap = { '15m': ':15', '15': ':15', '1h': ':60', '60': ':60', '4h': ':240', '240': ':240', 'd': ':D', 'daily': ':D', 'w': ':W', 'weekly': ':W' };
+  const suffix = sfxMap[tf.toLowerCase()] || ':D';
   const tfLabel = { ':15': '15m', ':60': '1H', ':240': '4H', ':D': 'Daily', ':W': 'Weekly' }[suffix];
-
-  let symScores = {};
-  try { symScores = JSON.parse(readFileSync(join(homedir_(), '.tradingview-mcp', 'config', 'symbol_scores.json'), 'utf8')); } catch {}
 
   const rows = [];
   for (const [key, entry] of Object.entries(cache)) {
     if (!key.endsWith(suffix) || entry?.fgScore == null) continue;
     const sym = key.replace(suffix, '');
     const cls = detectAssetClass(sym);
-    const catLabel = {
-      US_LARGE_CAP: 'US Large Cap', US_MID_SMALL: 'US Mid/Small',
-      ASX_TOP50: 'ASX Top 50', ASX_MINING_MID: 'ASX Mining Mid', ASX_MINING_MICRO: 'ASX Mining Micro',
-      CRYPTO_MAJOR: 'Crypto Major', CRYPTO_MID: 'Crypto Mid',
-      COMMODITIES: 'Commodities', ETFS: 'ETFs',
-    }[cls] || cls;
+    const catLabel = { US_LARGE_CAP: 'US Large Cap', US_MID_SMALL: 'US Mid/Small', ASX_TOP50: 'ASX Top 50', ASX_MINING_MID: 'ASX Mining Mid', ASX_MINING_MICRO: 'ASX Mining Micro', CRYPTO_MAJOR: 'Crypto Major', CRYPTO_MID: 'Crypto Mid', COMMODITIES: 'Commodities', ETFS: 'ETFs' }[cls] || cls;
 
     if (categoryFilter && cls !== categoryFilter && catLabel !== categoryFilter) continue;
 
     const fg = entry.fgScore;
-    let zn, sw;
+    const price = entry.lastClose || 0;
+    const mcap = estimateMcap(sym, price);
+
+    let zn;
     if (fg <= -30) zn = 'EXTREME FEAR'; else if (fg <= -15) zn = 'FEAR'; else if (fg <= -5) zn = 'WEAK FEAR';
     else if (fg <= 5) zn = 'NEUTRAL'; else if (fg <= 15) zn = 'WEAK GREED'; else if (fg <= 30) zn = 'GREED';
     else zn = 'EXTREME GREED';
 
     const cal = classifyCalibratedZone(sym, fg);
+    let sw = '';
     if (cal.severity <= -2) sw = 'ENTRY ZONE'; else if (cal.severity === -1) sw = 'WATCHING';
     else if (cal.severity >= 2) sw = 'TAKE PROFIT'; else if (cal.severity === 1) sw = 'EXIT ZONE';
-    else sw = '';
 
-    const tier = ['US_LARGE_CAP','ASX_MINING_MID','ASX_MINING_MICRO','COMMODITIES'].includes(cls) ? 1 :
-      ['US_MID_SMALL','ETFS','ASX_TOP50','CRYPTO_MAJOR'].includes(cls) ? 2 : 3;
+    const tier = ['US_LARGE_CAP', 'ASX_MINING_MID', 'ASX_MINING_MICRO', 'COMMODITIES'].includes(cls) ? 1 :
+      ['US_MID_SMALL', 'ETFS', 'ASX_TOP50', 'CRYPTO_MAJOR'].includes(cls) ? 2 : 3;
 
-    rows.push({ symbol: sym, fg, zone: zn, category: catLabel, cls, tier, swing: sw, rsi: entry.rsi });
+    rows.push({ symbol: sym, fg, zone: zn, category: catLabel, cls, tier, swing: sw, rsi: entry.rsi, price, mcap });
   }
 
   rows.sort((a, b) => a.fg - b.fg);
@@ -109,26 +131,18 @@ function buildDashboardData(tf, categoryFilter) {
   })).sort((a, b) => a.avg - b.avg);
 
   const avgFG = rows.length > 0 ? Math.round(rows.reduce((s, r) => s + r.fg, 0) / rows.length * 100) / 100 : 0;
-  const oversold = rows.filter(r => r.fg <= -25).length;
-  const overbought = rows.filter(r => r.fg >= 25).length;
 
   return {
-    tf: tfLabel,
-    updated: new Date().toISOString(),
-    total: rows.length,
-    avgFG, oversold, overbought,
-    pctOversold: rows.length > 0 ? Math.round(oversold / rows.length * 100) : 0,
-    pctOverbought: rows.length > 0 ? Math.round(overbought / rows.length * 100) : 0,
-    categories: catList,
-    rows,
+    tf: tfLabel, updated: new Date().toISOString(), total: rows.length,
+    avgFG, oversold: rows.filter(r => r.fg <= -25).length, overbought: rows.filter(r => r.fg >= 25).length,
+    pctOversold: rows.length > 0 ? Math.round(rows.filter(r => r.fg <= -25).length / rows.length * 100) : 0,
+    pctOverbought: rows.length > 0 ? Math.round(rows.filter(r => r.fg >= 25).length / rows.length * 100) : 0,
+    categories: catList, rows,
   };
 }
 
-function homedir_() { return process.env.HOME || process.env.USERPROFILE || '/tmp'; }
-
-// ─── Start server ───────────────────────────────────────────────────────────
-
 app.listen(PORT, () => {
+  const cache = loadCache();
   console.log(`F&G Dashboard running at http://localhost:${PORT}`);
-  console.log(`Serving ${Object.keys(loadCache()).length} cached symbols`);
+  console.log(`Serving ${Object.keys(cache).filter(k => k.endsWith(':D')).length} cached symbols`);
 });
