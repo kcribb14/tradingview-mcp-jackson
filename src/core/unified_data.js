@@ -130,23 +130,41 @@ function saveSourceMap(map) {
 function detectSymbol(symbol) {
   const s = symbol.trim();
 
-  // ASX: "BHP.AX", "ASX:BHP", or explicit market flag
-  if (s.endsWith('.AX') || s.startsWith('ASX:')) {
-    const ticker = s.replace('ASX:', '').replace('.AX', '');
-    return { type: 'asx', yahoo: ticker + '.AX', key: ticker + '.AX' };
+  // Exchange-prefixed: "ASX:BHP", "LSE:BARC", "TSX:ABX"
+  const prefixMatch = s.match(/^(ASX|LSE|TSX|HKEX|SGX|JSE):(.+)/i);
+  if (prefixMatch) {
+    const suffixMap = { ASX: '.AX', LSE: '.L', TSX: '.TO', HKEX: '.HK', SGX: '.SI', JSE: '.JO' };
+    const suffix = suffixMap[prefixMatch[1].toUpperCase()] || '';
+    const yahoo = prefixMatch[2] + suffix;
+    return { type: 'stock', yahoo, key: yahoo };
   }
 
-  // Already has exchange suffix (.L, .TO, .HK, etc.)
+  // Already has exchange suffix (.AX, .L, .TO, .HK, .T, .DE, .SI, .JO, .SA, .KS, etc.)
   if (s.match(/\.[A-Z]{1,3}$/)) {
     return { type: 'stock', yahoo: s, key: s };
   }
 
-  // Crypto: has -USD suffix, or is a known crypto
+  // Forex pairs: AUDUSD=X
+  if (s.endsWith('=X')) {
+    return { type: 'forex', yahoo: s, key: s };
+  }
+
+  // Futures/Commodities: GC=F, CL=F
+  if (s.endsWith('=F')) {
+    return { type: 'commodity', yahoo: s, key: s };
+  }
+
+  // Indices: ^GSPC, ^VIX, ^AXJO
+  if (s.startsWith('^')) {
+    return { type: 'index', yahoo: s, key: s };
+  }
+
+  // Crypto: has -USD suffix or USDT suffix
   if (s.includes('-USD') || s.endsWith('USDT')) {
     return { type: 'crypto', yahoo: s, key: s.replace(/[-\/]USD[T]?$/i, '') };
   }
 
-  // Crypto: short all-caps that look like crypto tickers
+  // Known crypto tokens (won't collide with stock tickers)
   const cryptoTokens = new Set([
     'BTC','ETH','SOL','XRP','DOGE','ADA','DOT','AVAX','LINK','MATIC','BNB',
     'SHIB','UNI','AAVE','LTC','NEAR','ATOM','FTM','ALGO','SAND','HBAR',
@@ -159,7 +177,7 @@ function detectSymbol(symbol) {
     return { type: 'crypto', yahoo: s, key: s.toUpperCase() };
   }
 
-  // Default: assume US stock
+  // Default: assume US stock / ETF
   return { type: 'stock', yahoo: s, key: s.toUpperCase() };
 }
 
@@ -174,8 +192,8 @@ function detectSymbol(symbol) {
 export async function fetchOhlcv(symbol, bars = 200) {
   const detected = detectSymbol(symbol);
 
-  // For stocks and ASX: ALWAYS use Yahoo directly, no source cache needed
-  if (detected.type === 'stock' || detected.type === 'asx') {
+  // For stocks, forex, commodities, indices: ALWAYS use Yahoo directly
+  if (['stock', 'asx', 'forex', 'commodity', 'index'].includes(detected.type)) {
     const data = await fetchYahoo(detected.yahoo, bars).catch(() => null);
     if (data && data.length >= 5) {
       return { bars: data.slice(-bars), source: 'yahoo', symbol, type: detected.type };

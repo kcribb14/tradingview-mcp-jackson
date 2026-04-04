@@ -165,6 +165,90 @@ export async function getCryptoTokens(forceRefresh = false) {
   return tokens;
 }
 
+// ─── International Exchanges ────────────────────────────────────────────────
+
+/**
+ * Generic exchange fetcher via Twelve Data.
+ * Caches per exchange with 7-day refresh.
+ */
+async function getExchangeStocks(exchange, suffix, forceRefresh = false) {
+  const file = join(UNI_DIR, `${exchange.toLowerCase()}_stocks.json`);
+  if (!forceRefresh && !isStale(file)) {
+    const cached = loadList(file);
+    if (cached?.length > 0) return cached;
+  }
+
+  const symbols = [];
+  const d = await fetchJSON(`https://api.twelvedata.com/stocks?exchange=${exchange}&type=Common%20Stock`);
+  if (d?.data) {
+    for (const s of d.data) {
+      symbols.push({ symbol: s.symbol + suffix, name: s.name, exchange, type: s.type || 'Common Stock' });
+    }
+  }
+  if (symbols.length > 0) saveList(file, symbols);
+  return symbols;
+}
+
+export async function getLSEStocks(force = false) { return getExchangeStocks('LSE', '.L', force); }
+export async function getTSXStocks(force = false) { return getExchangeStocks('TSX', '.TO', force); }
+export async function getHKEXStocks(force = false) { return getExchangeStocks('HKEX', '.HK', force); }
+export async function getSGXStocks(force = false) { return getExchangeStocks('SGX', '.SI', force); }
+export async function getJSEStocks(force = false) { return getExchangeStocks('JSE', '.JO', force); }
+
+// ─── Non-stock asset classes ────────────────────────────────────────────────
+
+const SECTOR_ETFS = [
+  'XLK','XLV','XLF','XLE','XLI','XLU','XLP','XLY','XLB','XLRE','XLC',
+  'SOXX','SMH','XBI','IBB','IYR','KRE','KBE','XHB','XRT','XME',
+];
+
+const COMMODITY_ETFS = [
+  'GDX','GDXJ','SIL','URA','LIT','PICK','COPX','REMX','PALL','PPLT',
+  'GLD','SLV','USO','UNG','DBA','DBC','GSG','PDBC','CPER','WEAT',
+];
+
+const COUNTRY_ETFS = [
+  'EWA','EWJ','FXI','EWZ','EWG','EWU','EWC','EWH','EWY','EWT',
+  'EWI','EWP','EWQ','EWL','EWD','EWN','EWK','EWO','INDA','VNM',
+];
+
+const BROAD_ETFS = [
+  'SPY','QQQ','DIA','IWM','VOO','VTI','ARKK','TQQQ','SQQQ','UPRO',
+  'TLT','SHY','IEF','AGG','HYG','LQD','EMB','BITO','MSTR','GBTC',
+  'VXX','UVXY','SPXS','SOXL','SOXS','FNGU','FNGD','LABU','LABD',
+];
+
+const FOREX_PAIRS = [
+  'EURUSD=X','GBPUSD=X','USDJPY=X','USDCHF=X','AUDUSD=X','USDCAD=X',
+  'NZDUSD=X','EURGBP=X','EURJPY=X','GBPJPY=X','AUDJPY=X','CADJPY=X',
+  'EURAUD=X','GBPAUD=X','EURNZD=X','GBPNZD=X','AUDNZD=X','USDMXN=X',
+  'USDZAR=X','USDSGD=X','USDHKD=X','USDCNH=X','USDINR=X','USDTRY=X',
+];
+
+const COMMODITIES = [
+  'GC=F','SI=F','CL=F','NG=F','HG=F','PL=F','PA=F',
+  'ZW=F','ZC=F','ZS=F','KC=F','CC=F','SB=F','CT=F',
+];
+
+const INDICES = [
+  '^GSPC','^DJI','^IXIC','^RUT','^VIX',
+  '^AXJO','^FTSE','^N225','^HSI','^GDAXI','^FCHI','^GSPTSE',
+  '^STOXX50E','^BSESN','^JKSE','^KS11','^STI','^BVSP',
+  '^TNX','^TYX','^FVX','^IRX',
+];
+
+const TSX_MINING = [
+  'ABX.TO','NEM.TO','AEM.TO','K.TO','WPM.TO','FNV.TO','PAAS.TO','EQX.TO','AGI.TO','OR.TO',
+  'CCO.TO','NXE.TO','DML.TO','FCU.TO','UEC.TO','FIND.TO','EFR.TO','FSY.TO',
+  'CS.TO','FM.TO','IVN.TO','LUN.TO','TKO.TO','ERO.TO','HBM.TO','ARIS.TO',
+  'TECK-B.TO','SII.TO','NGT.TO','CG.TO','DPM.TO','EDR.TO','LUG.TO','MAG.TO',
+];
+
+const LSE_MINING = [
+  'RIO.L','BHP.L','GLEN.L','AAL.L','ANTO.L','FRES.L','POLY.L','KAZ.L','EVR.L','GEMD.L',
+  'HMSO.L','PDL.L','SLP.L','TRQ.L','CEY.L','HOC.L','ALTN.L','YAU.L',
+];
+
 // ─── Presets ────────────────────────────────────────────────────────────────
 
 // S&P 500 — curated list of the largest US companies
@@ -225,8 +309,45 @@ export async function getPreset(preset) {
       return { symbols: all.map(t => t.symbol), market: 'crypto', name: 'Crypto Full' };
     }
 
+    // International exchanges
+    case 'lse_full': { const s = await getLSEStocks(); return { symbols: s.map(x => x.symbol), market: 'lse', name: 'LSE Full' }; }
+    case 'tsx_full': { const s = await getTSXStocks(); return { symbols: s.map(x => x.symbol), market: 'tsx', name: 'TSX Full' }; }
+    case 'hkex_full': { const s = await getHKEXStocks(); return { symbols: s.map(x => x.symbol), market: 'hkex', name: 'HKEX Full' }; }
+    case 'sgx_full': { const s = await getSGXStocks(); return { symbols: s.map(x => x.symbol), market: 'sgx', name: 'SGX Full' }; }
+    case 'jse_full': { const s = await getJSEStocks(); return { symbols: s.map(x => x.symbol), market: 'jse', name: 'JSE Full' }; }
+
+    // Mining across exchanges
+    case 'tsx_mining': return { symbols: TSX_MINING, market: 'tsx', name: 'TSX Mining' };
+    case 'lse_mining': return { symbols: LSE_MINING, market: 'lse', name: 'LSE Mining' };
+    case 'global_mining': return { symbols: [...ASX_MINING, ...TSX_MINING, ...LSE_MINING], market: 'global', name: 'Global Mining' };
+
+    // ETFs
+    case 'etf_sector': return { symbols: SECTOR_ETFS, market: 'us', name: 'Sector ETFs' };
+    case 'etf_commodity': return { symbols: COMMODITY_ETFS, market: 'us', name: 'Commodity ETFs' };
+    case 'etf_country': return { symbols: COUNTRY_ETFS, market: 'us', name: 'Country ETFs' };
+    case 'etf_all': return { symbols: [...BROAD_ETFS, ...SECTOR_ETFS, ...COMMODITY_ETFS, ...COUNTRY_ETFS], market: 'us', name: 'All ETFs' };
+
+    // Forex, Commodities, Indices
+    case 'forex_majors': return { symbols: FOREX_PAIRS, market: 'forex', name: 'Forex Majors' };
+    case 'commodities_all': return { symbols: COMMODITIES, market: 'commodities', name: 'All Commodities' };
+    case 'indices_global': return { symbols: INDICES, market: 'indices', name: 'Global Indices' };
+
+    // Everything combined
+    case 'everything': {
+      const us = (await getUSStocks()).map(s => s.symbol);
+      const asx = (await getASXStocks()).map(s => s.symbol);
+      const cr = (await getCryptoTokens()).map(t => t.symbol);
+      const lse = (await getLSEStocks()).map(s => s.symbol);
+      const tsx = (await getTSXStocks()).map(s => s.symbol);
+      return {
+        symbols: [...us, ...asx, ...lse, ...tsx, ...cr, ...FOREX_PAIRS, ...COMMODITIES, ...INDICES, ...BROAD_ETFS, ...SECTOR_ETFS, ...COMMODITY_ETFS],
+        market: 'all',
+        name: 'Everything',
+      };
+    }
+
     default:
-      throw new Error(`Unknown preset: ${preset}. Available: sp500, asx_mining, asx_200, asx_full, us_full, crypto_1000, crypto_full`);
+      throw new Error(`Unknown preset: ${preset}. Available: sp500, asx_mining, asx_200, asx_full, us_full, lse_full, tsx_full, hkex_full, sgx_full, jse_full, tsx_mining, lse_mining, global_mining, etf_sector, etf_commodity, etf_country, etf_all, forex_majors, commodities_all, indices_global, crypto_1000, crypto_full, everything`);
   }
 }
 
@@ -234,17 +355,27 @@ export async function getPreset(preset) {
  * Get universe stats.
  */
 export async function getUniverseStats() {
-  const us = await getUSStocks().catch(() => []);
-  const asx = await getASXStocks().catch(() => []);
-  const crypto = await getCryptoTokens().catch(() => []);
+  const counts = {};
+  const fetchers = [
+    ['us_stocks', getUSStocks],
+    ['asx_stocks', getASXStocks],
+    ['lse_stocks', getLSEStocks],
+    ['tsx_stocks', getTSXStocks],
+    ['hkex_stocks', getHKEXStocks],
+    ['sgx_stocks', getSGXStocks],
+    ['jse_stocks', getJSEStocks],
+    ['crypto_tokens', getCryptoTokens],
+  ];
 
-  return {
-    us_stocks: us.length,
-    asx_stocks: asx.length,
-    crypto_tokens: crypto.length,
-    total: us.length + asx.length + crypto.length,
-    us_file: US_FILE,
-    asx_file: ASX_FILE,
-    crypto_file: CRYPTO_FILE,
-  };
+  for (const [key, fn] of fetchers) {
+    try { counts[key] = (await fn()).length; } catch { counts[key] = 0; }
+  }
+
+  counts.etfs = BROAD_ETFS.length + SECTOR_ETFS.length + COMMODITY_ETFS.length + COUNTRY_ETFS.length;
+  counts.forex = FOREX_PAIRS.length;
+  counts.commodities = COMMODITIES.length;
+  counts.indices = INDICES.length;
+  counts.total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  return counts;
 }
