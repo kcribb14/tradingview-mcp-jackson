@@ -4,6 +4,7 @@ import * as fgScanner from '../../core/fg_scanner.js';
 import * as fgFast from '../../core/fg_fast_scanner.js';
 import * as fgExact from '../../core/fg_exact_scanner.js';
 import * as fgMtf from '../../core/fg_mtf.js';
+import * as dex from '../../core/dexscreener.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -156,6 +157,24 @@ register('scan', {
           symbols,
         });
       },
+    }],
+    ['dex', {
+      description: 'Scan top DEX pairs by chain with on-chain F&G scoring (DexScreener)',
+      options: {
+        chain: { type: 'string', short: 'c', description: 'Chain: solana, ethereum, base (default: solana)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 50)' },
+      },
+      handler: (opts) => dex.dexScan({
+        chain: opts.chain || 'solana',
+        top: opts.top ? Number(opts.top) : 50,
+      }),
+    }],
+    ['dex-vs-cex', {
+      description: 'Compare DEX vs CEX F&G scores — find alpha signals where on-chain and exchange data diverge',
+      options: {
+        top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
+      },
+      handler: (opts) => dex.dexVsCexScan({ top: opts.top ? Number(opts.top) : 20 }),
     }],
     ['parse', {
       description: 'Parse a TradingView value string to number',

@@ -4,6 +4,7 @@ import * as scanner from '../core/scanner.js';
 import * as fgScanner from '../core/fg_scanner.js';
 import * as fgFast from '../core/fg_fast_scanner.js';
 import * as fgExact from '../core/fg_exact_scanner.js';
+import * as dex from '../core/dexscreener.js';
 
 export function registerScannerTools(server) {
   server.tool('scanner_bulk_scan', 'Scan 100 stocks in ~8 seconds using screener data across multiple views. Returns ranked results with momentum, value, trend, and volume scores. No chart switching needed.', {
@@ -77,6 +78,21 @@ export function registerScannerTools(server) {
 
   server.tool('scanner_cache_clear', 'Clear the F&G score cache for a fresh start.', {}, async () => {
     try { return jsonResult(fgExact.clearCache()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('scanner_dex_scan', 'Scan top DEX pairs on a chain (Solana, Ethereum, Base) with on-chain F&G scoring. Uses DexScreener for real-time buy/sell counts, liquidity, volume, pair age.', {
+    chain: z.enum(['solana', 'ethereum', 'base']).optional().describe('Blockchain (default: solana)'),
+    top: z.number().optional().describe('Return top N results (default 50)'),
+  }, async ({ chain, top }) => {
+    try { return jsonResult(await dex.dexScan({ chain, top })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('scanner_dex_vs_cex', 'Compare DEX vs CEX Fear & Greed scores for major crypto tokens. Finds alpha signals where on-chain DEX data diverges from exchange data — DEX buying while CEX selling means smart money accumulating.', {
+    top: z.number().optional().describe('Return top N results (default 20)'),
+  }, async ({ top }) => {
+    try { return jsonResult(await dex.dexVsCexScan({ top })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }
