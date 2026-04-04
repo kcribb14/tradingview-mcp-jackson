@@ -1,74 +1,71 @@
-# F&G Dashboard — 2026-04-04
+# F&G Dashboard — 2026-04-04 12:30
+## Timeframe: Daily | Universe: 8160 symbols
 
-## Market Heat: FEAR (F&G: -11.61)
-- Total symbols: 8160
-- In Fear: 3827 (47%) | Extreme Fear: 2363
-- In Greed: 1073 (13%)
+### Market Heat: WEAK FEAR (avg F&G: -11.61)
+- Oversold (<-25): 1426 (17%)
+- Overbought (>+25): 14 (0%)
 
-## Category Breakdown
+### Category Breakdown
+| Category | Symbols | Avg F&G | % Fear | Entry Signals |
+|----------|---------|---------|--------|---------------|
+| Crypto Mid | 46 | -22.6 | 96% | 9 |
+| Crypto Major | 7 | -20.1 | 100% | 0 |
+| ASX Mining Micro | 1780 | -16.2 | 78% | 320 |
+| US Mid/Small | 2018 | -10.8 | 64% | 181 |
+| US Large Cap | 4251 | -10.0 | 64% | 352 |
+| ASX Top 50 | 43 | -8.7 | 58% | 1 |
+| ASX Mining Mid | 14 | -7.7 | 43% | 0 |
+| ETFs | 1 | +9.1 | 0% | 0 |
 
-| Category | Count | Avg F&G | % Fear | % Greed | Extreme Fear |
-|----------|-------|---------|--------|---------|-------------|
-| Crypto Mid | 46 | -22.6 | 43% | 4% | 8 |
-| Crypto Major | 7 | -20.1 | 43% | 0% | 0 |
-| ASX Mining Micro | 1780 | -16.2 | 52% | 4% | 477 |
-| US Mid/Small | 2018 | -10.8 | 19% | 26% | 181 |
-| US Large Cap | 4251 | -10.0 | 58% | 11% | 1674 |
-| ASX Top 50 | 43 | -8.7 | 58% | 5% | 18 |
-| ASX Mining Mid | 14 | -7.7 | 64% | 0% | 5 |
-| ETFs | 1 | +9.1 | 0% | 0% | 0 |
+### Top 30 Most Fearful
+| # | Symbol | F&G | Zone | Category | Swing | Tier |
+|---|--------|-----|------|----------|-------|------|
+| 1 | USR | -41.0 | EXTREME FEAR | US Mid/Small | ENTRY ZONE | T2 |
+| 2 | TMS.AX | -41.0 | EXTREME FEAR | ASX Mining Micro | ENTRY ZONE | T1 |
+| 3 | PR2.AX | -41.0 | EXTREME FEAR | ASX Mining Micro | ENTRY ZONE | T1 |
+| 4 | KMD.AX | -41.0 | EXTREME FEAR | ASX Mining Micro | ENTRY ZONE | T1 |
+| 5 | IMM.AX | -41.0 | EXTREME FEAR | ASX Mining Micro | ENTRY ZONE | T1 |
+| 6 | FHS.AX | -41.0 | EXTREME FEAR | ASX Mining Micro | ENTRY ZONE | T1 |
+| 7 | NSRX | -41.0 | EXTREME FEAR | US Mid/Small | ENTRY ZONE | T2 |
+| 8 | GBL | -41.0 | EXTREME FEAR | US Mid/Small | ENTRY ZONE | T2 |
+| 9 | AMZE | -41.0 | EXTREME FEAR | US Mid/Small | ENTRY ZONE | T2 |
+| 10 | AMS | -41.0 | EXTREME FEAR | US Mid/Small | ENTRY ZONE | T2 |
+| 11 | SUH.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 12 | SORT.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 13 | QDE.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 14 | POS.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 15 | PRO.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 16 | MAST.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 17 | MIRI.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 18 | LIT.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 19 | HAMA.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 20 | GELN.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 21 | FORG.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 22 | FDM.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 23 | ENET.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 24 | EQT.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 25 | DCTA.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 26 | CRTM.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 27 | CAU.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 28 | CHF.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 29 | BIH.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
+| 30 | 0K1R.L | -41.0 | EXTREME FEAR | US Large Cap | ENTRY ZONE | T1 |
 
-## Top 50 Most Fearful
-
-| # | Symbol | F&G | Signal | Category | Tier |
-|---|--------|-----|--------|----------|------|
-| 1 | USR | -41.0 | RARE FEAR | US Mid/Small | T2 |
-| 2 | TMS.AX | -41.0 | RARE FEAR | ASX Mining Micro | T1 |
-| 3 | PR2.AX | -41.0 | RARE FEAR | ASX Mining Micro | T1 |
-| 4 | KMD.AX | -41.0 | RARE FEAR | ASX Mining Micro | T1 |
-| 5 | IMM.AX | -41.0 | RARE FEAR | ASX Mining Micro | T1 |
-| 6 | FHS.AX | -41.0 | RARE FEAR | ASX Mining Micro | T1 |
-| 7 | NSRX | -41.0 | RARE FEAR | US Mid/Small | T2 |
-| 8 | GBL | -41.0 | RARE FEAR | US Mid/Small | T2 |
-| 9 | AMZE | -41.0 | RARE FEAR | US Mid/Small | T2 |
-| 10 | AMS | -41.0 | RARE FEAR | US Mid/Small | T2 |
-| 11 | SUH.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 12 | SORT.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 13 | QDE.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 14 | POS.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 15 | PRO.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 16 | MAST.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 17 | MIRI.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 18 | LIT.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 19 | HAMA.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 20 | GELN.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 21 | FORG.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 22 | FDM.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 23 | ENET.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 24 | EQT.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 25 | DCTA.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 26 | CRTM.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 27 | CAU.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 28 | CHF.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 29 | BIH.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 30 | 0K1R.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 31 | 0JQ2.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 32 | 0D1W.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 33 | 0A43.L | -41.0 | RARE FEAR | US Large Cap | T1 |
-| 34 | DFDV.L | -40.9 | RARE FEAR | US Large Cap | T1 |
-| 35 | OGEN | -40.9 | RARE FEAR | US Mid/Small | T2 |
-| 36 | NOG.L | -40.8 | RARE FEAR | US Large Cap | T1 |
-| 37 | NOTE | -40.8 | RARE FEAR | US Mid/Small | T2 |
-| 38 | ITM.AX | -40.7 | RARE FEAR | ASX Mining Micro | T1 |
-| 39 | TEAM.L | -40.6 | RARE FEAR | US Large Cap | T1 |
-| 40 | DVS | -40.6 | RARE FEAR | US Mid/Small | T2 |
-| 41 | 0JZS.L | -40.5 | RARE FEAR | US Large Cap | T1 |
-| 42 | MKA.L | -40.4 | RARE FEAR | US Large Cap | T1 |
-| 43 | ADN.AX | -40.4 | RARE FEAR | ASX Mining Micro | T1 |
-| 44 | TRUE.L | -40.4 | RARE FEAR | US Large Cap | T1 |
-| 45 | FIN.L | -40.3 | RARE FEAR | US Large Cap | T1 |
-| 46 | XSG.L | -40.3 | RARE FEAR | US Large Cap | T1 |
-| 47 | ARCM.L | -40.2 | RARE FEAR | US Large Cap | T1 |
-| 48 | RKB.AX | -40.1 | RARE FEAR | ASX Mining Micro | T1 |
-| 49 | 0QVI.L | -40.1 | RARE FEAR | US Large Cap | T1 |
-| 50 | HIQ.AX | -40.1 | RARE FEAR | ASX Mining Micro | T1 |
+### Entry Zone
+| Symbol | F&G | Category |
+|--------|-----|----------|
+| USR | -41.0 | US Mid/Small |
+| TMS.AX | -41.0 | ASX Mining Micro |
+| PR2.AX | -41.0 | ASX Mining Micro |
+| KMD.AX | -41.0 | ASX Mining Micro |
+| IMM.AX | -41.0 | ASX Mining Micro |
+| FHS.AX | -41.0 | ASX Mining Micro |
+| NSRX | -41.0 | US Mid/Small |
+| GBL | -41.0 | US Mid/Small |
+| AMZE | -41.0 | US Mid/Small |
+| AMS | -41.0 | US Mid/Small |
+| SUH.L | -41.0 | US Large Cap |
+| SORT.L | -41.0 | US Large Cap |
+| QDE.L | -41.0 | US Large Cap |
+| POS.L | -41.0 | US Large Cap |
+| PRO.L | -41.0 | US Large Cap |

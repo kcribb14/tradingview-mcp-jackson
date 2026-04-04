@@ -277,21 +277,32 @@ register('scan', {
       handler: () => production.watchList(),
     }],
     ['dashboard', {
-      description: 'CoinMarketCap-style F&G dashboard with categories, market heat, and filters',
+      description: 'CMC-style F&G dashboard. Toggle timeframes like CMC RSI page: --tf 15m|1H|4H|daily|weekly',
       options: {
+        tf: { type: 'string', description: 'Timeframe: 15m, 1H, 4H, daily, weekly (default: daily)' },
         category: { type: 'string', short: 'c', description: 'Filter: US_LARGE_CAP, ASX_MINING_MICRO, CRYPTO_MAJOR, etc' },
-        sort: { type: 'string', short: 's', description: 'Sort: fg_daily, symbol, category' },
+        sort: { type: 'string', short: 's', description: 'Sort: fg, symbol, category' },
         'fear-only': { type: 'boolean', description: 'Only show fear signals' },
-        'extreme-only': { type: 'boolean', description: 'Only show extreme fear/greed' },
+        'extreme-only': { type: 'boolean', description: 'Only extreme fear/greed' },
+        summary: { type: 'boolean', description: 'Category summary with all TFs' },
         top: { type: 'string', short: 'n', description: 'Top N results (default 100)' },
       },
-      handler: (opts) => dashboard.dashboard({
-        category: opts.category,
-        sort: opts.sort || 'fg_daily',
-        fear_only: opts['fear-only'] || false,
-        extreme_only: opts['extreme-only'] || false,
-        top: opts.top ? Number(opts.top) : 100,
-      }),
+      handler: (opts) => {
+        if (opts.summary) return dashboard.dashboard({ summary: true });
+        return dashboard.dashboard({
+          tf: opts.tf || 'daily',
+          category: opts.category,
+          sort: opts.sort || 'fg',
+          fear_only: opts['fear-only'] || false,
+          extreme_only: opts['extreme-only'] || false,
+          top: opts.top ? Number(opts.top) : 100,
+        });
+      },
+    }],
+    ['dashboard-history', {
+      description: 'Show F&G trend over saved daily snapshots',
+      options: { tf: { type: 'string', description: 'Timeframe (default: Daily)' } },
+      handler: (opts) => dashboard.historyView({ tf: opts.tf || 'Daily' }),
     }],
     ['track', {
       description: 'Show live P&L on all tracked signals',
