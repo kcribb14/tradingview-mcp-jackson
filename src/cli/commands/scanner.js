@@ -2,6 +2,7 @@ import { register } from '../router.js';
 import * as scanner from '../../core/scanner.js';
 import * as fgScanner from '../../core/fg_scanner.js';
 import * as fgFast from '../../core/fg_fast_scanner.js';
+import * as fgExact from '../../core/fg_exact_scanner.js';
 
 register('scan', {
   description: 'Bulk scanner — scan 100 stocks in seconds with custom scoring',
@@ -91,6 +92,38 @@ register('scan', {
         universe: opts.universe ? Number(opts.universe) : 100,
         deep: opts.deep ? Number(opts.deep) : 38,
         pine_wait_ms: opts['pine-wait'] ? Number(opts['pine-wait']) : 4000,
+      }),
+    }],
+    ['fg-exact', {
+      description: 'Exact F&G scan with incremental caching. First run calculates, subsequent runs use cache.',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 50)' },
+        top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
+        sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite (default: fear)' },
+        globals: { type: 'boolean', description: 'Fetch VIX/Gold globals (default: skip for speed)' },
+      },
+      handler: (opts) => fgExact.fgExactScan({
+        universe: opts.universe ? Number(opts.universe) : 50,
+        top: opts.top ? Number(opts.top) : 20,
+        sort: opts.sort || 'fear',
+        skip_globals: !opts.globals,
+      }),
+    }],
+    ['cache-stats', {
+      description: 'Show F&G cache statistics: size, hit rate, staleness distribution',
+      handler: () => fgExact.getCacheStats(),
+    }],
+    ['cache-clear', {
+      description: 'Wipe the F&G cache for a fresh start',
+      handler: () => fgExact.clearCache(),
+    }],
+    ['cache-warm', {
+      description: 'Pre-calculate F&G for all stocks so next scan is instant',
+      options: {
+        universe: { type: 'string', short: 'u', description: 'Stocks to warm (default 100)' },
+      },
+      handler: (opts) => fgExact.warmCache({
+        universe: opts.universe ? Number(opts.universe) : 100,
       }),
     }],
     ['parse', {
