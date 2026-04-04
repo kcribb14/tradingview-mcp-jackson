@@ -1,8 +1,9 @@
 /**
- * Exact F&G Scanner with incremental caching.
+ * Exact F&G Scanner with incremental caching + Yahoo Finance OHLCV.
  *
- * First scan: full 200-bar pull per symbol, calculates everything, saves state.
- * Subsequent scans: only fetches delta bars, updates EMA/RMA incrementally.
+ * Uses Yahoo Finance for batch OHLCV (26ms/symbol) instead of chart switching
+ * (13s/symbol). Combined with file-backed EMA/RMA state persistence, this
+ * enables scanning 200+ stocks in under 30 seconds cold, <5 seconds warm.
  *
  * Scan tiers:
  *   INSTANT  (0ms)  — cached <1hr, return immediately
@@ -10,14 +11,13 @@
  *   PARTIAL  (50ms) — cached <24hrs, fetch 50 new bars
  *   FULL    (200ms) — no cache, fetch 200 bars, full calculation
  */
-import * as chart from './chart.js';
-import * as data from './data.js';
 import { classifyZone, proxyFearGreed } from './fg_scanner.js';
 import { readMultiView } from './scanner.js';
+import { fetchBatchOhlcv, fetchOhlcv } from './yahoo_ohlcv.js';
 import {
-  loadCache, saveCache, loadGlobals,
+  loadCache, saveCache, loadGlobals, saveGlobals,
   getScanTier, getBarsForTier, updateCacheEntry,
-  fetchGlobals, pruneCache, getCacheStats, clearCache,
+  pruneCache, getCacheStats, clearCache,
   computeFGFromBars,
 } from './fg_cache.js';
 
@@ -38,23 +38,61 @@ function f(stock, key) {
   return (typeof v === 'number') ? v : null;
 }
 
+// ─── Fetch globals via Yahoo (VIX + Gold) ───────────────────────────────────
+
+async function fetchGlobalsYahoo() {
+  const globals = loadGlobals();
+  const now = Date.now();
+
+  if (globals.lastFetch && (now - new Date(globals.lastFetch).getTime()) < 3600_000) {
+    return globals;
+  }
+
+  try {
+    const [vixData, goldData] = await Promise.all([
+      fetchOhlcv('^VIX', 30),
+      fetchOhlcv('GC=F', 30),
+    ]);
+
+    if (vixData?.bars?.length > 0) {
+      const closes = vixData.bars.map(b => b.close);
+      const last = closes[closes.length - 1];
+      const avg = closes.reduce((s, v) => s + v, 0) / closes.length;
+      globals.vix = { close: last, ema20: avg, deviation: avg > 0 ? (last / avg - 1) * 100 : 0 };
+    }
+
+    if (goldData?.bars?.length > 0) {
+      const closes = goldData.bars.map(b => b.close);
+      const roc = closes.length > 20
+        ? (closes[closes.length - 1] - closes[closes.length - 21]) / closes[closes.length - 21] * 100
+        : 0;
+      globals.gold = Math.max(-15, Math.min(15, roc * 2));
+      globals.goldClose = closes[closes.length - 1];
+    }
+  } catch { /* keep existing */ }
+
+  globals.lastFetch = new Date().toISOString();
+  saveGlobals(globals);
+  return globals;
+}
+
 // ─── Exact cached scan ──────────────────────────────────────────────────────
 
 /**
  * Run an exact F&G scan with incremental caching.
+ * Uses Yahoo Finance for OHLCV — zero TradingView chart switching.
  *
- * @param {number} universe - Total stocks to consider (default 50)
+ * @param {number} universe - Total stocks to consider (default 100)
  * @param {number} top - Return top N results (default 20)
- * @param {boolean} skipGlobals - Skip VIX/Gold fetch (default true for speed)
+ * @param {boolean} skip_globals - Skip VIX/Gold fetch (default false)
  * @param {string} sort - Sort: 'fear', 'greed', 'composite' (default 'fear')
  */
-export async function fgExactScan({ universe = 50, top = 20, skip_globals = true, sort = 'fear' } = {}) {
+export async function fgExactScan({ universe = 100, top = 20, skip_globals = false, sort = 'fear' } = {}) {
   const t0 = Date.now();
   const cache = loadCache();
-  const globals = loadGlobals();
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // TIER 1: Screener read → get symbol list + proxy scores
+  // SCREENER: get symbol list + proxy scores
   // ═══════════════════════════════════════════════════════════════════════════
 
   const stocks = await readMultiView({
@@ -63,7 +101,6 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
   });
   const screenerTime = Date.now() - t0;
 
-  // Score via proxy for all stocks
   const proxyScores = stocks.map(stock => ({
     symbol: stock.Symbol,
     proxy: proxyFearGreed(stock),
@@ -77,25 +114,17 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
     analyst_rating: stock._raw?.['Analyst Rating'] ?? null,
   }));
 
+  // Fetch globals (VIX + Gold) via Yahoo
+  const globals = skip_globals ? loadGlobals() : await fetchGlobalsYahoo();
+
   // ═══════════════════════════════════════════════════════════════════════════
-  // TIER 2: Determine scan tier per symbol, batch by tier
+  // CLASSIFY: determine scan tier per symbol
   // ═══════════════════════════════════════════════════════════════════════════
 
   const now = Date.now();
   const tierCounts = { INSTANT: 0, MICRO: 0, PARTIAL: 0, FULL: 0 };
   const results = [];
-  const chartSwitchStart = Date.now();
-
-  // Fetch globals if needed (VIX + Gold)
-  let globalsUsed = globals;
-  if (!skip_globals) {
-    const currentState = await chart.getState?.() ?? {};
-    globalsUsed = await fetchGlobals(
-      (opts) => data.getOhlcv(opts),
-      (opts) => chart.setSymbol(opts),
-      currentState.symbol || proxyScores[0]?.symbol || 'AAPL',
-    );
-  }
+  const needFetch = []; // symbols that need OHLCV from Yahoo
 
   for (const stock of proxyScores) {
     const sym = stock.symbol;
@@ -106,7 +135,6 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
     tierCounts[tier]++;
 
     if (tier === 'INSTANT' && cached) {
-      // Return cached score immediately — no chart interaction
       results.push({
         symbol: sym,
         fg_score: cached.fgScore,
@@ -122,59 +150,71 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
         sector: stock.sector,
         analyst_rating: stock.analyst_rating,
       });
-      continue;
+    } else {
+      needFetch.push({ stock, tier, cached, barCount: getBarsForTier(tier) });
     }
+  }
 
-    // Need to fetch bars — switch chart
-    const barCount = getBarsForTier(tier);
-    try {
-      await chart.setSymbol({ symbol: sym });
-      // Minimal wait — OHLCV is available quickly, don't need full chart render
-      await new Promise(r => setTimeout(r, tier === 'FULL' ? 500 : 300));
+  // ═══════════════════════════════════════════════════════════════════════════
+  // YAHOO BATCH: fetch OHLCV for all non-cached symbols in parallel
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      const ohlcv = await data.getOhlcv({ count: barCount, summary: false });
-      const bars = ohlcv?.bars || [];
+  const yahooStart = Date.now();
+  let yahooFetched = 0, yahooErrors = 0;
 
-      if (bars.length < 5) {
-        // Not enough data — use proxy score
+  if (needFetch.length > 0) {
+    const symbols = needFetch.map(n => n.stock.symbol);
+    const maxBars = Math.max(...needFetch.map(n => n.barCount));
+    const batch = await fetchBatchOhlcv(symbols, maxBars, 15);
+
+    for (const item of needFetch) {
+      const sym = item.stock.symbol;
+      const ohlcvData = batch.results.get(sym);
+
+      if (!ohlcvData || ohlcvData.bars.length < 5) {
+        yahooErrors++;
+        // Fall back to proxy score
         results.push({
           symbol: sym,
-          fg_score: stock.proxy.proxy_fg,
-          zone: stock.proxy.zone,
-          severity: stock.proxy.severity,
-          components: stock.proxy.components,
-          rsi: stock.rsi,
-          price: stock.price,
-          change_pct: stock.change_pct,
-          proxy_fg: stock.proxy.proxy_fg,
-          scan_tier: tier,
-          error: `Only ${bars.length} bars available`,
-          sector: stock.sector,
-          analyst_rating: stock.analyst_rating,
+          fg_score: item.stock.proxy.proxy_fg,
+          zone: item.stock.proxy.zone,
+          severity: item.stock.proxy.severity,
+          components: item.stock.proxy.components,
+          rsi: item.stock.rsi,
+          price: item.stock.price,
+          change_pct: item.stock.change_pct,
+          proxy_fg: item.stock.proxy.proxy_fg,
+          scan_tier: item.tier,
+          error: 'Yahoo fetch failed',
+          sector: item.stock.sector,
+          analyst_rating: item.stock.analyst_rating,
         });
         continue;
       }
 
-      // Compute F&G from bars with cached EMA state
-      const fg = computeFGFromBars(bars, cached?._state || {}, globalsUsed);
+      // Trim bars to the needed count for this tier
+      const bars = ohlcvData.bars.slice(-item.barCount);
+      const fg = computeFGFromBars(bars, item.cached?._state || {}, globals);
+
       if (!fg) {
         results.push({
           symbol: sym,
-          fg_score: stock.proxy.proxy_fg,
-          zone: stock.proxy.zone,
-          severity: stock.proxy.severity,
-          components: stock.proxy.components,
-          proxy_fg: stock.proxy.proxy_fg,
-          scan_tier: tier,
+          fg_score: item.stock.proxy.proxy_fg,
+          zone: item.stock.proxy.zone,
+          severity: item.stock.proxy.severity,
+          components: item.stock.proxy.components,
+          proxy_fg: item.stock.proxy.proxy_fg,
+          scan_tier: item.tier,
           error: 'Computation failed',
-          sector: stock.sector,
-          analyst_rating: stock.analyst_rating,
+          sector: item.stock.sector,
+          analyst_rating: item.stock.analyst_rating,
         });
         continue;
       }
 
       // Update cache
-      cache[sym] = updateCacheEntry(sym, bars, cached, globalsUsed);
+      cache[sym] = updateCacheEntry(sym, bars, item.cached, globals);
+      yahooFetched++;
 
       results.push({
         symbol: sym,
@@ -183,34 +223,21 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
         severity: fg.severity,
         components: fg.components,
         rsi: fg.rsi,
-        price: stock.price,
-        change_pct: stock.change_pct,
-        proxy_fg: stock.proxy.proxy_fg,
-        proxy_error: Math.round(Math.abs(stock.proxy.proxy_fg - fg.fgScore) * 100) / 100,
-        scan_tier: tier,
+        price: item.stock.price,
+        change_pct: item.stock.change_pct,
+        proxy_fg: item.stock.proxy.proxy_fg,
+        proxy_error: Math.round(Math.abs(item.stock.proxy.proxy_fg - fg.fgScore) * 100) / 100,
+        scan_tier: item.tier,
         bar_count: bars.length,
-        sector: stock.sector,
-        analyst_rating: stock.analyst_rating,
-      });
-    } catch (err) {
-      results.push({
-        symbol: sym,
-        fg_score: stock.proxy.proxy_fg,
-        zone: stock.proxy.zone,
-        severity: stock.proxy.severity,
-        components: stock.proxy.components,
-        proxy_fg: stock.proxy.proxy_fg,
-        scan_tier: tier,
-        error: err.message,
-        sector: stock.sector,
-        analyst_rating: stock.analyst_rating,
+        sector: item.stock.sector,
+        analyst_rating: item.stock.analyst_rating,
       });
     }
   }
 
-  const chartSwitchTime = Date.now() - chartSwitchStart;
+  const yahooTime = Date.now() - yahooStart;
 
-  // Save cache (pruned)
+  // Save cache
   saveCache(pruneCache(cache));
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -226,7 +253,6 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
 
   const totalTime = Date.now() - t0;
 
-  // Distribution
   const dist = { extreme_fear: 0, fear: 0, neutral: 0, greed: 0, extreme_greed: 0 };
   for (const r of results) {
     if (r.severity === -2) dist.extreme_fear++;
@@ -241,12 +267,14 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
     scan_type: 'fg-exact',
     timing: {
       screener_ms: screenerTime,
-      chart_switch_ms: chartSwitchTime,
+      yahoo_ms: yahooTime,
       total_ms: totalTime,
       total_readable: (totalTime / 1000).toFixed(1) + 's',
     },
     cache_stats: {
       ...tierCounts,
+      yahoo_fetched: yahooFetched,
+      yahoo_errors: yahooErrors,
       summary: `${results.length} stocks: ${tierCounts.INSTANT} instant, ${tierCounts.MICRO} micro, ${tierCounts.PARTIAL} partial, ${tierCounts.FULL} full — total ${(totalTime / 1000).toFixed(1)}s`,
     },
     stocks_scanned: results.length,
@@ -258,55 +286,66 @@ export async function fgExactScan({ universe = 50, top = 20, skip_globals = true
   };
 }
 
-// ─── Cache warming ──────────────────────────────────────────────────────────
+// ─── Cache warming (Yahoo-powered) ─────────────────────────────────────────
 
 /**
- * Pre-calculate F&G for all symbols so next scan is instant.
- * Iterates through every symbol, fetching 200 bars and computing from scratch.
+ * Warm the F&G cache using Yahoo Finance for batch OHLCV.
+ * No chart switching — fetches all data externally in parallel.
+ *
+ * @param {number} universe - Stocks to warm (default 100)
+ * @param {string[]} symbols - Explicit symbol list (overrides screener)
  */
-export async function warmCache({ universe = 100 } = {}) {
+export async function warmCache({ universe = 100, symbols: explicitSymbols } = {}) {
   const t0 = Date.now();
   const cache = loadCache();
-  const globals = loadGlobals();
-
-  const stocks = await readMultiView({
-    views: ['Overview'],
-    maxRows: universe,
-  });
-  const screenerTime = Date.now() - t0;
-
-  let warmed = 0, skipped = 0, errors = 0;
+  const globals = await fetchGlobalsYahoo();
   const now = Date.now();
 
-  for (const stock of stocks) {
-    const sym = stock.Symbol;
-    if (!sym) continue;
+  let symbolList;
+  let screenerTime = 0;
 
-    // Skip if already fresh (<1hr)
+  if (explicitSymbols && explicitSymbols.length > 0) {
+    symbolList = explicitSymbols;
+  } else {
+    const stocks = await readMultiView({ views: ['Overview'], maxRows: universe });
+    screenerTime = Date.now() - t0;
+    symbolList = stocks.map(s => s.Symbol).filter(Boolean);
+  }
+
+  // Filter out already-fresh symbols
+  const stale = [];
+  let skipped = 0;
+  for (const sym of symbolList) {
     const cached = cache[sym];
     if (cached && getScanTier(cached, now) === 'INSTANT') {
       skipped++;
-      continue;
+    } else {
+      stale.push(sym);
     }
+  }
 
-    try {
-      await chart.setSymbol({ symbol: sym });
-      await new Promise(r => setTimeout(r, 800));
+  // Batch fetch all stale symbols via Yahoo
+  const yahooStart = Date.now();
+  let warmed = 0, errors = 0;
 
-      const ohlcv = await data.getOhlcv({ count: 200, summary: false });
-      const bars = ohlcv?.bars || [];
-      if (bars.length >= 5) {
-        cache[sym] = updateCacheEntry(sym, bars, cached, globals);
+  if (stale.length > 0) {
+    const batch = await fetchBatchOhlcv(stale, 200, 15);
+
+    for (const sym of stale) {
+      const ohlcvData = batch.results.get(sym);
+      if (ohlcvData && ohlcvData.bars.length >= 5) {
+        cache[sym] = updateCacheEntry(sym, ohlcvData.bars, cache[sym], globals);
         warmed++;
       } else {
         errors++;
       }
-    } catch {
-      errors++;
     }
+
+    // Save every batch
+    saveCache(pruneCache(cache));
   }
 
-  saveCache(pruneCache(cache));
+  const yahooTime = Date.now() - yahooStart;
   const totalTime = Date.now() - t0;
 
   return {
@@ -314,11 +353,58 @@ export async function warmCache({ universe = 100 } = {}) {
     warmed,
     skipped,
     errors,
-    total_symbols: stocks.length,
+    total_symbols: symbolList.length,
     timing: {
       screener_ms: screenerTime,
+      yahoo_ms: yahooTime,
       total_ms: totalTime,
       total_readable: (totalTime / 1000).toFixed(1) + 's',
+    },
+  };
+}
+
+// ─── Daily incremental update ───────────────────────────────────────────────
+
+/**
+ * Update all cached symbols with just the latest bar.
+ * For daily updates after initial warm-up.
+ */
+export async function updateCache() {
+  const t0 = Date.now();
+  const cache = loadCache();
+  const globals = await fetchGlobalsYahoo();
+
+  const symbols = Object.keys(cache);
+  if (symbols.length === 0) {
+    return { success: true, updated: 0, message: 'Cache is empty. Run cache-warm first.' };
+  }
+
+  // Fetch 5 bars for each (enough for incremental EMA update)
+  const batch = await fetchBatchOhlcv(symbols, 5, 15);
+
+  let updated = 0, errors = 0;
+  for (const sym of symbols) {
+    const ohlcvData = batch.results.get(sym);
+    if (ohlcvData && ohlcvData.bars.length > 0) {
+      cache[sym] = updateCacheEntry(sym, ohlcvData.bars, cache[sym], globals);
+      updated++;
+    } else {
+      errors++;
+    }
+  }
+
+  saveCache(cache);
+  const totalTime = Date.now() - t0;
+
+  return {
+    success: true,
+    updated,
+    errors,
+    total_symbols: symbols.length,
+    timing: {
+      total_ms: totalTime,
+      total_readable: (totalTime / 1000).toFixed(1) + 's',
+      per_symbol_ms: symbols.length > 0 ? Math.round(totalTime / symbols.length) : 0,
     },
   };
 }

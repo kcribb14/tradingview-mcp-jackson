@@ -95,18 +95,16 @@ register('scan', {
       }),
     }],
     ['fg-exact', {
-      description: 'Exact F&G scan with incremental caching. First run calculates, subsequent runs use cache.',
+      description: 'Exact F&G scan with incremental caching + Yahoo Finance OHLCV (no chart switching)',
       options: {
-        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 50)' },
+        universe: { type: 'string', short: 'u', description: 'Stocks to scan (default 100)' },
         top: { type: 'string', short: 'n', description: 'Top N results (default 20)' },
         sort: { type: 'string', short: 's', description: 'Sort: fear, greed, composite (default: fear)' },
-        globals: { type: 'boolean', description: 'Fetch VIX/Gold globals (default: skip for speed)' },
       },
       handler: (opts) => fgExact.fgExactScan({
-        universe: opts.universe ? Number(opts.universe) : 50,
+        universe: opts.universe ? Number(opts.universe) : 100,
         top: opts.top ? Number(opts.top) : 20,
         sort: opts.sort || 'fear',
-        skip_globals: !opts.globals,
       }),
     }],
     ['cache-stats', {
@@ -118,13 +116,17 @@ register('scan', {
       handler: () => fgExact.clearCache(),
     }],
     ['cache-warm', {
-      description: 'Pre-calculate F&G for all stocks so next scan is instant',
+      description: 'Warm the F&G cache via Yahoo Finance (no chart switching). 100 stocks in ~5s.',
       options: {
         universe: { type: 'string', short: 'u', description: 'Stocks to warm (default 100)' },
       },
       handler: (opts) => fgExact.warmCache({
         universe: opts.universe ? Number(opts.universe) : 100,
       }),
+    }],
+    ['cache-update', {
+      description: 'Daily incremental update: fetch latest bar for all cached symbols, update EMA',
+      handler: () => fgExact.updateCache(),
     }],
     ['parse', {
       description: 'Parse a TradingView value string to number',
