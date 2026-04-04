@@ -66,6 +66,41 @@ td{padding:6px 12px;white-space:nowrap}
 .pct-p{color:#0ecb81}.pct-n{color:#f6465d}
 .page-bar{padding:6px 24px;display:flex;justify-content:space-between;font-size:11px;color:#848e9c;align-items:center}
 .mcap{color:#848e9c;font-size:12px}
+/* Modal */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:none;align-items:center;justify-content:center;animation:fadeIn .15s}
+.modal-backdrop.open{display:flex}
+.modal{background:#1e2329;border:1px solid #2b2f36;border-radius:12px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:0;animation:slideUp .2s}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #2b2f36}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-close{background:none;border:none;color:#848e9c;font-size:20px;cursor:pointer;padding:4px 8px}
+.modal-close:hover{color:#eaecef}
+.modal-body{padding:16px 20px}
+.filter-row{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.filter-row .label{width:120px;font-size:12px;color:#848e9c;flex-shrink:0}
+.filter-row .inputs{display:flex;gap:6px;flex:1}
+.filter-input{background:#2b3139;border:1px solid #363a45;color:#eaecef;padding:6px 10px;border-radius:4px;font-size:13px;width:100%;outline:none}
+.filter-input:focus{border-color:#f0b90b}
+.filter-input::placeholder{color:#5e6673}
+.input-wrap{position:relative;flex:1}
+.input-prefix{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#848e9c;font-size:12px;pointer-events:none}
+.input-wrap .filter-input{padding-left:22px}
+.modal-footer{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid #2b2f36}
+.modal-footer .reset{background:none;border:none;color:#848e9c;font-size:12px;cursor:pointer;text-decoration:underline}
+.modal-footer .reset:hover{color:#eaecef}
+.btn-apply{background:#f0b90b;border:none;color:#181a20;padding:8px 24px;border-radius:4px;font-size:13px;font-weight:600;cursor:pointer}
+.btn-apply:hover{background:#d4a20a}
+
+/* Filter pills + presets */
+.pills-bar{display:flex;gap:6px;padding:8px 24px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #2b2f36}
+.pill{display:inline-flex;align-items:center;gap:4px;background:#2b2f36;border:1px solid #363a45;color:#eaecef;padding:3px 10px;border-radius:12px;font-size:11px}
+.pill .pill-x{cursor:pointer;color:#848e9c;font-weight:bold;margin-left:2px}
+.pill .pill-x:hover{color:#f6465d}
+.pill-count{background:#1f6feb;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:2px}
+.preset-bar{display:flex;gap:4px;padding:6px 24px;flex-wrap:wrap}
+.preset-bar .btn{font-size:11px;padding:3px 9px}
+
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 @media(max-width:900px){.sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}.sidebar .card{min-width:180px}.chart-container{height:320px}.hm{display:none}}
 </style>
 </head>
@@ -87,9 +122,70 @@ td{padding:6px 12px;white-space:nowrap}
 </div>
 
 <div class="cat-tabs" id="catTabs"></div>
+
+<div class="preset-bar">
+  <button class="btn" onclick="applyPreset('fear')">Fear Only</button>
+  <button class="btn" onclick="applyPreset('extreme')">Extreme Fear</button>
+  <button class="btn" onclick="applyPreset('recovery')">Recovery Signals</button>
+  <button class="btn" onclick="applyPreset('entry')">Entry Zones</button>
+  <button class="btn" onclick="applyPreset('greed')">Greed Warnings</button>
+  <button class="btn" onclick="applyPreset('clear')">Clear All</button>
+  <button class="btn" style="margin-left:auto" onclick="openModal()">⚙ Filters</button>
+</div>
+
+<div class="pills-bar" id="pillsBar"></div>
+
 <div class="filters-bar">
-  <input type="text" id="search" placeholder="Search symbol..." oninput="renderTable()">
-  <label><input type="checkbox" id="fearOnly" onchange="renderTable()"> Fear only</label>
+  <input type="text" id="search" placeholder="Search symbol..." oninput="applyAll()">
+</div>
+
+<!-- Filter Modal -->
+<div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Filters</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="filter-row"><span class="label">Market Cap</span><div class="inputs">
+        <div class="input-wrap"><span class="input-prefix">$</span><input class="filter-input" id="f_mcap_min" placeholder="Min (e.g. 50M)"></div>
+        <div class="input-wrap"><span class="input-prefix">$</span><input class="filter-input" id="f_mcap_max" placeholder="Max"></div>
+      </div></div>
+      <div class="filter-row"><span class="label">F&G (Daily)</span><div class="inputs">
+        <input class="filter-input" id="f_fg_min" placeholder="Min">
+        <input class="filter-input" id="f_fg_max" placeholder="Max">
+      </div></div>
+      <div class="filter-row"><span class="label">Price</span><div class="inputs">
+        <div class="input-wrap"><span class="input-prefix">$</span><input class="filter-input" id="f_price_min" placeholder="Min"></div>
+        <div class="input-wrap"><span class="input-prefix">$</span><input class="filter-input" id="f_price_max" placeholder="Max"></div>
+      </div></div>
+      <div class="filter-row"><span class="label">RSI</span><div class="inputs">
+        <input class="filter-input" id="f_rsi_min" placeholder="Min">
+        <input class="filter-input" id="f_rsi_max" placeholder="Max">
+      </div></div>
+      <div class="filter-row"><span class="label">Swing Status</span><div class="inputs">
+        <select class="filter-input" id="f_swing">
+          <option value="">Any</option>
+          <option value="ENTRY ZONE">Entry Zone</option>
+          <option value="WATCHING">Watching</option>
+          <option value="EXIT ZONE">Exit Zone</option>
+          <option value="TAKE PROFIT">Take Profit</option>
+        </select>
+      </div></div>
+      <div class="filter-row"><span class="label">Tier</span><div class="inputs">
+        <select class="filter-input" id="f_tier">
+          <option value="">Any</option>
+          <option value="1">Tier 1 (Proven)</option>
+          <option value="2">Tier 2 (Weak)</option>
+          <option value="3">Tier 3 (Unproven)</option>
+        </select>
+      </div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="reset" onclick="resetFilters()">Reset all</button>
+      <button class="btn-apply" onclick="applyModal()">Apply Filters</button>
+    </div>
+  </div>
 </div>
 <div class="table-wrap"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div class="page-bar" id="pageBar"></div>
@@ -100,6 +196,80 @@ Chart.register(ChartDataLabels);
 let D=null,chart=null,cTF='D',cCat=null,sCol='fg',sDir=1,pSz=100;
 const TFS=[{k:'D',l:'Daily'},{k:'15',l:'15m'},{k:'60',l:'1H'},{k:'240',l:'4H'},{k:'W',l:'Weekly'}];
 
+// Active filters
+let filters={mcap_min:null,mcap_max:null,fg_min:null,fg_max:null,price_min:null,price_max:null,rsi_min:null,rsi_max:null,swing:null,tier:null};
+
+function parseNum(v){if(!v)return null;v=v.toString().trim().toUpperCase();let m=1;if(v.endsWith('T')){m=1e12;v=v.slice(0,-1)}else if(v.endsWith('B')){m=1e9;v=v.slice(0,-1)}else if(v.endsWith('M')){m=1e6;v=v.slice(0,-1)}else if(v.endsWith('K')){m=1e3;v=v.slice(0,-1)}const n=parseFloat(v);return isNaN(n)?null:n*m}
+
+function openModal(){document.getElementById('modalBackdrop').classList.add('open');populateModal()}
+function closeModal(){document.getElementById('modalBackdrop').classList.remove('open')}
+
+function populateModal(){
+  document.getElementById('f_mcap_min').value=filters.mcap_min?fmtInput(filters.mcap_min):'';
+  document.getElementById('f_mcap_max').value=filters.mcap_max?fmtInput(filters.mcap_max):'';
+  document.getElementById('f_fg_min').value=filters.fg_min??'';
+  document.getElementById('f_fg_max').value=filters.fg_max??'';
+  document.getElementById('f_price_min').value=filters.price_min??'';
+  document.getElementById('f_price_max').value=filters.price_max??'';
+  document.getElementById('f_rsi_min').value=filters.rsi_min??'';
+  document.getElementById('f_rsi_max').value=filters.rsi_max??'';
+  document.getElementById('f_swing').value=filters.swing||'';
+  document.getElementById('f_tier').value=filters.tier||'';
+}
+function fmtInput(v){if(v>=1e12)return(v/1e12)+'T';if(v>=1e9)return(v/1e9)+'B';if(v>=1e6)return(v/1e6)+'M';if(v>=1e3)return(v/1e3)+'K';return v}
+
+function applyModal(){
+  filters.mcap_min=parseNum(document.getElementById('f_mcap_min').value);
+  filters.mcap_max=parseNum(document.getElementById('f_mcap_max').value);
+  filters.fg_min=parseFloat(document.getElementById('f_fg_min').value)||null;
+  filters.fg_max=parseFloat(document.getElementById('f_fg_max').value)||null;
+  filters.price_min=parseFloat(document.getElementById('f_price_min').value)||null;
+  filters.price_max=parseFloat(document.getElementById('f_price_max').value)||null;
+  filters.rsi_min=parseFloat(document.getElementById('f_rsi_min').value)||null;
+  filters.rsi_max=parseFloat(document.getElementById('f_rsi_max').value)||null;
+  filters.swing=document.getElementById('f_swing').value||null;
+  filters.tier=document.getElementById('f_tier').value?parseInt(document.getElementById('f_tier').value):null;
+  closeModal();applyAll();
+}
+
+function resetFilters(){
+  filters={mcap_min:null,mcap_max:null,fg_min:null,fg_max:null,price_min:null,price_max:null,rsi_min:null,rsi_max:null,swing:null,tier:null};
+  populateModal();applyAll();
+}
+
+function applyPreset(p){
+  resetFilters();
+  if(p==='fear')filters.fg_max=-15;
+  else if(p==='extreme')filters.fg_max=-30;
+  else if(p==='recovery'){filters.fg_max=-20;/* Note: would need 15m fg_min but we don't have it client-side */}
+  else if(p==='entry')filters.swing='ENTRY ZONE';
+  else if(p==='greed')filters.fg_min=15;
+  else if(p==='clear'){resetFilters();return}
+  applyAll();
+}
+
+function removeFilter(k){filters[k]=null;applyAll()}
+
+function applyAll(){renderPills();renderSidebar();renderScatter();renderTable()}
+
+function renderPills(){
+  const pills=[];
+  if(filters.mcap_min)pills.push({k:'mcap_min',t:'MCap ≥ '+fmt$(filters.mcap_min)});
+  if(filters.mcap_max)pills.push({k:'mcap_max',t:'MCap ≤ '+fmt$(filters.mcap_max)});
+  if(filters.fg_min!=null)pills.push({k:'fg_min',t:'F&G ≥ '+filters.fg_min});
+  if(filters.fg_max!=null)pills.push({k:'fg_max',t:'F&G ≤ '+filters.fg_max});
+  if(filters.price_min)pills.push({k:'price_min',t:'Price ≥ $'+filters.price_min});
+  if(filters.price_max)pills.push({k:'price_max',t:'Price ≤ $'+filters.price_max});
+  if(filters.rsi_min!=null)pills.push({k:'rsi_min',t:'RSI ≥ '+filters.rsi_min});
+  if(filters.rsi_max!=null)pills.push({k:'rsi_max',t:'RSI ≤ '+filters.rsi_max});
+  if(filters.swing)pills.push({k:'swing',t:filters.swing});
+  if(filters.tier)pills.push({k:'tier',t:'Tier '+filters.tier});
+  const count=pills.length;
+  let html=pills.map(p=>`<span class="pill">${p.t}<span class="pill-x" onclick="removeFilter('${p.k}')">✕</span></span>`).join('');
+  if(count>0)html+=`<span class="pill" style="cursor:pointer" onclick="openModal()">Filters<span class="pill-count">${count}</span></span>`;
+  document.getElementById('pillsBar').innerHTML=html;
+}
+
 function fmt$(v){if(v>=1e12)return'$'+(v/1e12).toFixed(1)+'T';if(v>=1e9)return'$'+(v/1e9).toFixed(1)+'B';if(v>=1e6)return'$'+(v/1e6).toFixed(0)+'M';return'$'+Math.round(v)}
 
 async function loadData(tf){const c=cCat?'&category='+encodeURIComponent(cCat):'';const r=await fetch('/api/cached?tf='+tf+c);D=await r.json();render()}
@@ -108,18 +278,23 @@ async function refresh(){document.getElementById('meta').textContent='Refreshing
 function render(){
   if(!D)return;
   document.getElementById('meta').textContent=D.total.toLocaleString()+' symbols · '+D.tf+' · '+new Date(D.updated).toLocaleString();
-  renderSidebar();renderTFBar();renderCatTabs();renderScatter();renderTable();
+  renderPills();renderSidebar();renderTFBar();renderCatTabs();renderScatter();renderTable();
 }
 
 function renderSidebar(){
-  const pF=D.total>0?Math.round(D.rows.filter(r=>r.fg<=-5).length/D.total*100):0;
-  const pG=D.total>0?Math.round(D.rows.filter(r=>r.fg>=5).length/D.total*100):0;
-  const tp=Math.max(0,Math.min(100,(D.avgFG+50)/100*100));
-  const ac=D.avgFG<=-15?'#f6465d':D.avgFG<=-5?'#e65100':D.avgFG>=15?'#0ecb81':D.avgFG>=5?'#2e7d32':'#848e9c';
-  const entries=D.rows.filter(r=>r.swing==='ENTRY ZONE').length;
+  const filtered=applyFiltersToRows(D.rows);
+  const total=filtered.length;
+  const pF=total>0?Math.round(filtered.filter(r=>r.fg<=-5).length/total*100):0;
+  const pG=total>0?Math.round(filtered.filter(r=>r.fg>=5).length/total*100):0;
+  const avgFG=total>0?Math.round(filtered.reduce((s,r)=>s+r.fg,0)/total*100)/100:0;
+  const tp=Math.max(0,Math.min(100,(avgFG+50)/100*100));
+  const ac=avgFG<=-15?'#f6465d':avgFG<=-5?'#e65100':avgFG>=15?'#0ecb81':avgFG>=5?'#2e7d32':'#848e9c';
+  const entries=filtered.filter(r=>r.swing==='ENTRY ZONE').length;
+  const oversold=filtered.filter(r=>r.fg<=-25).length;
+  const overbought=filtered.filter(r=>r.fg>=25).length;
   document.getElementById('sidebar').innerHTML=`
-    <div class="card"><div class="card-title">Average F&G (${D.tf})</div>
-      <div class="card-value" style="color:${ac}">${D.avgFG>0?'+':''}${D.avgFG}</div>
+    <div class="card"><div class="card-title">Average F&G (${D.tf}) · ${total.toLocaleString()} symbols</div>
+      <div class="card-value" style="color:${ac}">${avgFG>0?'+':''}${avgFG}</div>
       <div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-thumb" style="left:${tp}%"></div></div>
       <div class="card-labels"><span>Fear</span><span>Greed</span></div></div>
     <div class="card"><div class="card-title">Fear vs Greed</div>
@@ -129,8 +304,8 @@ function renderSidebar(){
       <div style="display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:6px">
         <div style="width:${pF}%;background:#0ecb81"></div><div style="width:${100-pF-pG}%;background:#474d57"></div><div style="width:${pG}%;background:#f6465d"></div></div></div>
     <div class="card"><div class="card-title">Signals</div>
-      <div class="card-row"><span>Oversold (&lt;-25)</span><span style="color:#0ecb81">${D.oversold}</span></div>
-      <div class="card-row"><span>Overbought (&gt;+25)</span><span style="color:#f6465d">${D.overbought}</span></div>
+      <div class="card-row"><span>Oversold (&lt;-25)</span><span style="color:#0ecb81">${oversold}</span></div>
+      <div class="card-row"><span>Overbought (&gt;+25)</span><span style="color:#f6465d">${overbought}</span></div>
       <div class="card-row"><span>Entry Zone</span><span style="color:#f0b90b;font-weight:600">${entries}</span></div></div>`;
 }
 
@@ -149,8 +324,8 @@ function renderScatter(){
   const ct=canvas.parentElement;
   canvas.width=ct.clientWidth;canvas.height=ct.clientHeight;
 
-  // Select points: all with mcap, sample to max 600
-  let pts=D.rows.filter(r=>r.mcap>0);
+  // Select points: filtered rows with mcap, sample to max 600
+  let pts=applyFiltersToRows(D.rows).filter(r=>r.mcap>0);
   if(pts.length>600){
     const ext=pts.filter(r=>Math.abs(r.fg)>15).slice(0,300);
     const rest=pts.filter(r=>Math.abs(r.fg)<=15).sort(()=>Math.random()-.5).slice(0,300);
@@ -258,11 +433,25 @@ function renderTable(){
   document.getElementById('pageBar').innerHTML=`<span>${page.length} of ${rows.length}</span><span>${[50,100,250,'All'].map(n=>`<button class="btn" style="font-size:10px;padding:2px 7px" onclick="pSz=${n==='All'?99999:n};renderTable()">${n}</button>`).join(' ')}</span>`;
 }
 
+function applyFiltersToRows(rows){
+  let r=[...rows];
+  if(filters.mcap_min)r=r.filter(x=>(x.mcap||0)>=filters.mcap_min);
+  if(filters.mcap_max)r=r.filter(x=>(x.mcap||0)<=filters.mcap_max);
+  if(filters.fg_min!=null)r=r.filter(x=>x.fg>=filters.fg_min);
+  if(filters.fg_max!=null)r=r.filter(x=>x.fg<=filters.fg_max);
+  if(filters.price_min)r=r.filter(x=>(x.price||0)>=filters.price_min);
+  if(filters.price_max)r=r.filter(x=>(x.price||0)<=filters.price_max);
+  if(filters.rsi_min!=null)r=r.filter(x=>(x.rsi||0)>=filters.rsi_min);
+  if(filters.rsi_max!=null)r=r.filter(x=>(x.rsi||0)<=filters.rsi_max);
+  if(filters.swing)r=r.filter(x=>x.swing===filters.swing);
+  if(filters.tier)r=r.filter(x=>x.tier===filters.tier);
+  return r;
+}
+
 function getF(){
-  let r=D?[...D.rows]:[];
-  const q=document.getElementById('search').value.toUpperCase();
+  let r=D?applyFiltersToRows(D.rows):[];
+  const q=(document.getElementById('search')?.value||'').toUpperCase();
   if(q)r=r.filter(x=>x.symbol.includes(q));
-  if(document.getElementById('fearOnly').checked)r=r.filter(x=>x.fg<=-5);
   r.sort((a,b)=>{let va=a[sCol],vb=b[sCol];if(typeof va==='string')return va.localeCompare(vb)*sDir;return((va??0)-(vb??0))*sDir});
   return r;
 }
