@@ -129,18 +129,20 @@ function generateBatchPine(symbols) {
 
   // For each symbol we need: close, EMA(50), RSI(14), volume, avg volume
   // We'll compute a composite F&G proxy from these in Pine
+  // request.security calls + ta.change() must run on every bar (global scope)
   const securityCalls = syms.map((sym, i) => {
-    // request.security returns a tuple: [close, ema50, rsi14, volume, sma_vol20]
     return `
 // ${sym}
-[c${i}, e${i}, r${i}, v${i}, av${i}] = request.security("${sym}", timeframe.period, [close, ta.ema(close, 50), ta.rsi(close, 14), volume, ta.sma(volume, 20)])`;
+[c${i}, e${i}, r${i}, v${i}, av${i}] = request.security("${sym}", timeframe.period, [close, ta.ema(close, 50), ta.rsi(close, 14), volume, ta.sma(volume, 20)])
+float chg${i} = ta.change(c${i})`;
   }).join('\n');
 
+  // F&G computation uses pre-computed chg values (no ta.* inside conditional)
   const tableRows = syms.map((sym, i) => {
     return `
     // ${sym} - compute F&G components
     float pmacd${i} = e${i} > 0 ? (c${i} / e${i} - 1) * 100 : 0
-    float mf${i} = av${i} > 0 ? (v${i} / av${i} - 1) * math.sign(ta.change(c${i})) * 15 : 0
+    float mf${i} = av${i} > 0 ? (v${i} / av${i} - 1) * math.sign(nz(chg${i})) * 15 : 0
     float rsiComp${i} = (r${i} - 50) * 0.6
     float fg${i} = math.max(-60, math.min(60, (pmacd${i} * 0.35 + rsiComp${i} * 0.35 + mf${i} * 0.3)))
     table.cell(t, 0, ${i}, "${sym}")
