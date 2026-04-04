@@ -343,6 +343,9 @@ export async function productionMTF({ us = 2000, asx = 2000, crypto = 500, top =
     tier3_unproven: tier3.slice(0, 15),
     most_extreme: mostExtreme,
     outperformers_in_fear: outperformersInFear,
-    greed_warnings: [...results].sort((a, b) => (b.fg_D ?? 0) - (a.fg_D ?? 0)).filter(r => r.calibrated_severity >= 1).slice(0, 10),
+    greed_exits: [...results].sort((a, b) => (b.fg_D ?? 0) - (a.fg_D ?? 0)).filter(r => r.calibrated_severity >= 1).slice(0, 10).map(r => ({
+      ...r,
+      greed_note: 'TAKE PROFIT — do NOT short. Backtest: greed signals produce +1.4% forward (market keeps going up). Use as EXIT signal for swing positions.',
+    })),
   };
 }
