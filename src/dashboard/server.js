@@ -12,6 +12,7 @@ import { dirname, join } from 'path';
 import { loadCache, saveCache as _saveCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
 import { loadDexTokens } from '../core/dex_universe.js';
+import { scoreSignal } from '../core/signal_scorer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -150,6 +151,17 @@ function rebuildData() {
 
     // Server-side safety net: filter out any scores outside [-80, +100]
     rows = rows.filter(r => r.f >= -80 && r.f <= 100);
+
+    // Apply signal scoring to entry zone symbols
+    for (const r of rows) {
+      if (r.w === 'ENTRY ZONE' || r.w === 'WATCHING') {
+        const clsKey = { 'US Large Cap': 'US_LARGE_CAP', 'US Mid/Small': 'US_MID_SMALL', 'ASX Top 50': 'ASX_TOP50', 'ASX Mining Mid': 'ASX_MINING_MID', 'ASX Mining Micro': 'ASX_MINING_MICRO', 'Crypto Major': 'CRYPTO_MAJOR', 'Crypto Mid': 'CRYPTO_MID', 'Commodities': 'COMMODITIES', 'ETFs': 'ETFS' }[r.c] || 'US_MID_SMALL';
+        const result = scoreSignal(r, { threshold: r.f - (r.ss > 0 ? 5 : 0), classKey: clsKey });
+        r.sq = result.score; // signal quality
+        r.sg = result.grade; // signal grade
+        r.sf = result.factors; // signal factors
+      }
+    }
     rows.sort((a, b) => a.f - b.f);
 
     // Stats
@@ -679,9 +691,22 @@ async function bgWorkerLoop() {
 rebuildData();
 setInterval(rebuildData, 300000); // Refresh every 5 minutes
 
-app.listen(PORT, () => {
+// Get local network IP for phone access
+import { networkInterfaces } from 'os';
+function getLocalIP() {
+  for (const ifaces of Object.values(networkInterfaces())) {
+    for (const iface of ifaces) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+}
+
+app.listen(PORT, '0.0.0.0', () => {
   const mem = process.memoryUsage();
+  const ip = getLocalIP();
   console.log(`F&G Dashboard: http://localhost:${PORT}`);
+  console.log(`Network:       http://${ip}:${PORT}`);
   console.log(`Symbols: ${DATA.stats.total} | Memory: ${Math.round(mem.heapUsed / 1e6)}MB`);
   // Start background worker after 10s delay
   setTimeout(() => {

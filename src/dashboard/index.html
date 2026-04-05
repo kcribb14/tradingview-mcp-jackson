@@ -811,14 +811,36 @@ async function loadSignals(){
 
     let html='<div class="sig-section"><div class="sig-title">REGIME STATUS</div><div style="padding:4px 0;font-size:12px">'+regime+'</div></div>';
 
-    // Sort by Smart Score (highest quality signals first)
-    const entryRanked=[...entry].sort((a,b)=>(b.ss||0)-(a.ss||0));
-    html+='<div class="sig-section"><div class="sig-title">ENTRY SIGNALS — ranked by Smart Score ('+d.signals?.entry+' total, top 30)</div>';
-    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Smart</th><th>Whale</th><th>RSI</th><th>Price</th><th>Action</th></tr>';
-    entryRanked.slice(0,30).forEach(r=>{
-      const ssCol=r.ss>=60?'#0ecb81':r.ss>=30?'#f0b90b':'#848e9c';
-      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="color:'+ssCol+';font-weight:600">'+(r.ss||0)+'</td><td style="font-size:10px">'+(r.wh==='ACC'?'🐋':'—')+'</td><td style="color:#848e9c">'+(r.r!=null?r.r:'—')+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td><td><button class="btn" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openDM(\''+r.s+'\',\''+r.c+'\')">View</button></td></tr>';
-    });
+    // Sort by signal quality score (highest first), fall back to smart score
+    const entryRanked=[...entry].sort((a,b)=>(b.sq||b.ss||0)-(a.sq||a.ss||0));
+    const gradeA=entryRanked.filter(r=>(r.sg||'D')==='A');
+    const gradeB=entryRanked.filter(r=>(r.sg||'D')==='B');
+    const gradeC=entryRanked.filter(r=>(r.sg||'D')==='C'||(r.sg||'D')==='D');
+
+    function sigRow(r){
+      const gCol={'A':'#0ecb81','B':'#f0b90b','C':'#848e9c','D':'#5e6673'}[r.sg||'D']||'#848e9c';
+      const factors=(r.sf||[]).map(f=>f.name+':'+f.val).join(', ');
+      return'<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:700;color:'+gCol+'">'+(r.sg||'?')+'</td><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="color:'+gCol+';font-weight:600">'+(r.sq||r.ss||0)+'</td><td style="font-size:10px">'+(r.wh==='ACC'?'🐋':'—')+'</td><td style="color:#848e9c;font-size:10px">'+(r.r!=null?r.r:'—')+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td><td style="font-size:9px;color:#5e6673;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+factors+'">'+factors+'</td></tr>';
+    }
+
+    if(gradeA.length>0){
+      html+='<div class="sig-section"><div class="sig-title" style="color:#0ecb81">🅰️ GRADE A — HIGH CONVICTION ('+gradeA.length+')</div>';
+      html+='<table class="sig-table"><tr><th>Grade</th><th>Symbol</th><th>Class</th><th>F&G</th><th>Score</th><th>Whale</th><th>RSI</th><th>Price</th><th>Factors</th></tr>';
+      gradeA.slice(0,15).forEach(r=>{html+=sigRow(r)});
+      html+='</table></div>';
+    }
+    if(gradeB.length>0){
+      html+='<div class="sig-section"><div class="sig-title" style="color:#f0b90b">🅱️ GRADE B — MODERATE ('+gradeB.length+')</div>';
+      html+='<table class="sig-table"><tr><th>Grade</th><th>Symbol</th><th>Class</th><th>F&G</th><th>Score</th><th>Whale</th><th>RSI</th><th>Price</th><th>Factors</th></tr>';
+      gradeB.slice(0,15).forEach(r=>{html+=sigRow(r)});
+      html+='</table></div>';
+    }
+    if(gradeC.length>0){
+      html+='<div class="sig-section"><div class="sig-title">🅲 GRADE C/D — SPECULATIVE ('+gradeC.length+')</div>';
+      html+='<table class="sig-table"><tr><th>Grade</th><th>Symbol</th><th>Class</th><th>F&G</th><th>Score</th><th>Whale</th><th>RSI</th><th>Price</th><th>Factors</th></tr>';
+      gradeC.slice(0,10).forEach(r=>{html+=sigRow(r)});
+      html+='</table></div>';
+    }
     html+='</table></div>';
 
     html+='<div class="sig-section"><div class="sig-title">WATCHING ('+d.signals?.watching+' total, showing top 20)</div>';
