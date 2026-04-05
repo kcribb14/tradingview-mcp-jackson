@@ -356,7 +356,7 @@ app.get('/api/health', (req, res) => {
 
 // ─── Shared OHLCV fetcher (used by history endpoint + background worker) ────
 
-const YAHOO_RANGES = { '15': { range: '60d', interval: '15m' }, '60': { range: '2y', interval: '1h' }, '240': { range: '2y', interval: '1d' }, 'D': { range: '10y', interval: '1d' }, 'W': { range: 'max', interval: '1wk' } };
+const YAHOO_RANGES = { '15': { range: '60d', interval: '15m' }, '60': { range: '2y', interval: '1h' }, '240': { range: '2y', interval: '1d' }, 'D': { range: 'max', interval: '1d' }, 'W': { range: 'max', interval: '1wk' } };
 const BINANCE_INTERVALS = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
 
 async function fetchBars(sym, tf) {
@@ -378,24 +378,51 @@ async function fetchBars(sym, tf) {
       }
     } catch {}
   }
+  // Yahoo Finance — try max range first, fall back to shorter if sparse
+  async function tryYahoo(ticker2, range2, interval2) {
+    try {
+      const r2 = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker2)}?range=${range2}&interval=${interval2}&includePrePost=false`, { signal: AbortSignal.timeout(5000) });
+      if (!r2.ok) return [];
+      const d2 = await r2.json();
+      const ch = d2?.chart?.result?.[0];
+      if (!ch?.timestamp) return [];
+      const q2 = ch.indicators.quote[0];
+      const b = [];
+      for (let i = 0; i < ch.timestamp.length; i++)
+        if (q2.close[i] != null && q2.open[i] != null)
+          b.push({ time: ch.timestamp[i], open: q2.open[i], high: q2.high[i], low: q2.low[i], close: q2.close[i], volume: q2.volume[i] || 0 });
+      return b;
+    } catch { return []; }
+  }
   try {
     const cfg = YAHOO_RANGES[tf] || YAHOO_RANGES['D'];
     let ticker = sym;
     if (isCrypto && !ticker.includes('-')) ticker += '-USD';
-    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${cfg.range}&interval=${cfg.interval}&includePrePost=false`, { signal: AbortSignal.timeout(5000) });
-    if (r.ok) {
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart?.timestamp) {
-        const q = chart.indicators.quote[0];
-        const bars = [];
-        for (let i = 0; i < chart.timestamp.length; i++)
-          if (q.close[i] != null && q.open[i] != null)
-            bars.push({ time: chart.timestamp[i], open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i], volume: q.volume[i] || 0 });
-        if (bars.length >= 20) return bars;
-      }
+    let bars2 = await tryYahoo(ticker, cfg.range, cfg.interval);
+    // If range=max returned sparse data (<500 bars for daily), retry with 10y
+    if (tf === 'D' && bars2.length > 0 && bars2.length < 500) {
+      const bars10y = await tryYahoo(ticker, '10y', '1d');
+      if (bars10y.length > bars2.length) bars2 = bars10y;
     }
+    if (bars2.length >= 20) return bars2;
   } catch {}
+
+  // CoinGecko fallback for crypto daily (gives full history back to inception)
+  if (isCrypto && tf === 'D') {
+    try {
+      const cgId = cgIdMap.get(sym.toUpperCase());
+      if (cgId) {
+        const cgr = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/ohlc?vs_currency=usd&days=max`, { signal: AbortSignal.timeout(10000) });
+        if (cgr.ok) {
+          const cgd = await cgr.json();
+          if (Array.isArray(cgd) && cgd.length >= 50) {
+            const cgBars = cgd.map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open: o, high: h, low: l, close: c, volume: 0 }));
+            return cgBars;
+          }
+        }
+      }
+    } catch {}
+  }
   return null;
 }
 
@@ -629,6 +656,57 @@ app.get('/api/sector-compare', (req, res) => {
     };
   }).sort((a, b) => a.avg - b.avg); // Deepest fear first
   res.json({ sectors });
+});
+
+// Historical F&G extremes — find every fear/greed event in full history
+app.get('/api/extremes/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const threshold = parseFloat(req.query.threshold) || -25;
+    const exitThreshold = parseFloat(req.query.exit) || -10;
+    const { computeTimeSeries } = await import('../core/fg_backtest.js');
+    const bars = await fetchBars(sym, 'D');
+    if (!bars || bars.length < 200) return res.json({ error: 'Insufficient history', bars: bars?.length || 0 });
+
+    const series = computeTimeSeries(bars);
+    if (series.length < 50) return res.json({ error: 'Not enough F&G data', series: series.length });
+
+    // Find every time F&G crossed below threshold
+    const events = [];
+    let inFear = false, entry = null;
+    for (let i = 0; i < series.length; i++) {
+      const s = series[i];
+      if (!inFear && s.fg_score <= threshold) {
+        inFear = true;
+        entry = { date: s.date, fg: Math.round(s.fg_score * 10) / 10, price: s.close, idx: i };
+      } else if (inFear && s.fg_score > exitThreshold) {
+        inFear = false;
+        const exitPrice = s.close;
+        const ret = entry.price > 0 ? Math.round((exitPrice / entry.price - 1) * 10000) / 100 : 0;
+        const holdDays = i - entry.idx;
+        // Also calculate 30d return from entry
+        const p30 = entry.idx + 30 < series.length ? series[entry.idx + 30].close : null;
+        const ret30 = p30 && entry.price > 0 ? Math.round((p30 / entry.price - 1) * 10000) / 100 : null;
+        events.push({ entryDate: entry.date, entryFG: entry.fg, entryPrice: entry.price, exitDate: s.date, exitPrice, holdDays, returnPct: ret, return30d: ret30 });
+      }
+    }
+
+    const returns = events.map(e => e.return30d).filter(v => v != null);
+    const wins = returns.filter(r => r > 0);
+    const avg = returns.length > 0 ? Math.round(returns.reduce((a, b) => a + b, 0) / returns.length * 10) / 10 : null;
+    const best = returns.length > 0 ? Math.max(...returns) : null;
+    const worst = returns.length > 0 ? Math.min(...returns) : null;
+
+    res.json({
+      symbol: sym, threshold, totalBars: bars.length, fgBars: series.length,
+      yearsOfData: Math.round((series[series.length - 1]?.close ? (new Date(series[series.length - 1].date) - new Date(series[0].date)) / 365.25 / 86400000 : 0) * 10) / 10,
+      extremeEvents: events.length,
+      stats: { avg30dReturn: avg, winRate: returns.length > 0 ? Math.round(wins.length / returns.length * 100) : null, best, worst, medianHoldDays: events.length > 0 ? events.sort((a, b) => a.holdDays - b.holdDays)[Math.floor(events.length / 2)].holdDays : null },
+      events: events.slice(-20), // Last 20 events
+      currentFG: series[series.length - 1]?.fg_score,
+      distanceToThreshold: Math.round((series[series.length - 1]?.fg_score - threshold) * 10) / 10,
+    });
+  } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
 // Geological data endpoint
