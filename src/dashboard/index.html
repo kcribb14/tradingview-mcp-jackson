@@ -771,17 +771,13 @@ async function loadCycle(){
 
 // ─── View switching ─────────────────────────────────────────────────────────
 let curView='scanner';
-const viewEls=['viewScanner','viewWatchgrid','viewSignals'];
+const viewEls=['viewScanner','viewWatchgrid','viewSignals','viewCycle','viewTrending'];
 const scannerEls=['tfBar','sidebar','catBar','filters','pager']; // elements to show only in scanner view
 
 function switchView(view){
   curView=view;
   // Toggle view containers
   viewEls.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=id==='view'+view.charAt(0).toUpperCase()+view.slice(1)?'':'none'});
-  for(const v of ['Scanner','Watchgrid','Signals','Cycle','Trending']){
-    const el=document.getElementById('view'+v);
-    if(el)el.style.display=v.toLowerCase()===view?'':'none';
-  }
   // Show/hide scanner-specific elements
   const showScanner=view==='scanner';
   ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showScanner?'':'none'});
@@ -790,6 +786,7 @@ function switchView(view){
   const nav=document.getElementById('nav'+view.charAt(0).toUpperCase()+view.slice(1));
   if(nav)nav.classList.add('active');
   // Load view data
+  if(view==='scanner'){renderScatter();renderTFBar();renderCatBar();renderTable()}
   if(view==='watchgrid')loadWatchlistGrid();
   if(view==='signals')loadSignals();
   if(view==='cycle')loadCycle();
