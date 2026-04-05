@@ -14,6 +14,7 @@ import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.
 import { loadDexTokens } from '../core/dex_universe.js';
 
 import { scoreSignal } from '../core/signal_scorer.js';
+import { miningFundamental, cryptoFundamental, stockFundamental, commodityFundamental, calculateGap } from '../core/fundamental_catalysts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,6 +31,13 @@ try {
     console.log('CANETOAD loaded:', Object.keys(CANETOAD).length, 'tickers with geological data');
   }
 } catch (e) { console.error('CANETOAD load error:', e.message); }
+
+// Load crypto fundamentals cache
+let CRYPTO_FUND = {};
+try {
+  const cf = join(HOME, '.tradingview-mcp', 'cache', 'crypto_fundamentals.json');
+  if (existsSync(cf)) { CRYPTO_FUND = JSON.parse(readFileSync(cf, 'utf8')); console.log('Crypto fundamentals loaded:', Object.keys(CRYPTO_FUND).length, 'tokens'); }
+} catch {}
 
 app.use(compression());
 app.use(express.json());
@@ -122,6 +130,14 @@ function rebuildData() {
 
       // Geological data from CANETOAD
       const geo = CANETOAD[sym] || null;
+      // Universal fundamental score
+      let fundScore = null;
+      if (geo && cat.includes('Mining')) fundScore = miningFundamental(geo);
+      else if (cls.includes('CRYPTO')) fundScore = cryptoFundamental(CRYPTO_FUND[sym] || { buyRatio: (entry.components?.moneyFlow ?? 0) > 10 ? 0.6 : 0.5 });
+      else if (cls === 'COMMODITIES') fundScore = commodityFundamental({ pmacd: entry.components?.pmacd, ror: entry.components?.ror });
+      else fundScore = stockFundamental({ volumeSpike: Math.abs(entry.components?.moneyFlow ?? 0) > 30 ? 3 : 1, revenueGrowth: 0 });
+      const fvGap = calculateGap(fundScore, fg);
+
       rows.push({
         s: sym, f: clamp(fg), z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
         r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null, ch,
@@ -130,10 +146,10 @@ function rebuildData() {
         f4: clamp(cache[sym + ':240']?.fgScore),
         fw: clamp(cache[sym + ':W']?.fgScore),
         wh: whale, ad: athDist, ss: smartScore,
-        gh: geo?.total_holes || null, // Total drillholes
-        gs: geo?.geological_score || null, // Geo score
-        gp: geo?.geological_percentile || null, // P99/P95/etc
-        gst: geo?.stranded_assets?.estimated_newly_economic || null, // Stranded intercepts
+        gh: geo?.total_holes || null, gs: geo?.geological_score || null,
+        gp: geo?.geological_percentile || null, gst: geo?.stranded_assets?.estimated_newly_economic || null,
+        fs: fundScore, // Fundamental score 0-100
+        fg_gap: fvGap, // Fundamental vs Sentiment gap
       });
       const last = rows[rows.length - 1];
       last.spark = [last.f1, last.fh, last.f4, last.f, last.fw].filter(v => v != null);

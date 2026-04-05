@@ -167,6 +167,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('smart')" title="Multi-factor score 60+ combining F&G, volume, RSI, momentum">🎯 Smart</button>
   <button class="btn" onclick="applyPreset('smartmoney')" title="Fear + large avg trade size + buying pressure = Nansen-style smart money">🧠 Acc</button>
   <button class="btn" onclick="applyPreset('geological')" title="ASX miners with high geological score + F&G fear = undervalued geology">🔬 Geo</button>
+  <button class="btn" onclick="applyPreset('alpha')" title="Fundamental score > sentiment by 30+ pts — market hasn't priced in strong catalysts">💎 Alpha</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view -->
@@ -392,6 +393,7 @@ function renderTable(){
   if(filters.whale)rows=rows.filter(r=>r.wh===filters.whale);
   if(filters.smartMin!=null)rows=rows.filter(r=>(r.ss||0)>=filters.smartMin);
   if(filters.geoMin!=null)rows=rows.filter(r=>(r.gs||0)>=filters.geoMin);
+  if(filters.gapMin!=null)rows=rows.filter(r=>(r.fg_gap||0)>=filters.gapMin);
 
   const fk=tfKey[cTF]||'f';
   const cols=[
@@ -514,7 +516,8 @@ function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null,whale:null,s
   if(p==='whale')filters.whale='ACC';
   if(p==='smart')filters.smartMin=60;
   if(p==='smartmoney'){filters.whale='ACC';filters.fg_max=-10}
-  if(p==='geological')filters.geoMin=50; // Geo score 50+ = significant drilling data
+  if(p==='geological')filters.geoMin=50;
+  if(p==='alpha')filters.gapMin=30; // Fundamental vs sentiment gap > 30
   renderTable()}
 async function refresh(){await loadPage(curPage);loadScatter()}
 async function toggleFav(s,ev){ev?.stopPropagation();if(FAVS.includes(s)){FAVS=FAVS.filter(x=>x!==s);fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}else{FAVS.push(s);fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}renderTable();renderCatBar()}
@@ -715,6 +718,22 @@ async function toggleRowExpand(sym,cat,tr){
     try{const gr=await fetch('/api/geology/'+encodeURIComponent(sym));geo=await gr.json();if(geo.error)geo=null}catch{}
 
     let html='<div class="expand-detail">';
+
+    // Universal Fundamental vs Sentiment bar
+    if(row?.fs!=null){
+      const fs=row.fs;const fg2=row.f;const gap=row.fg_gap||0;
+      const sentNorm=Math.max(0,Math.min(100,Math.round((fg2+50)/100*100)));
+      const gapCol=gap>40?'#0ecb81':gap>20?'#f0b90b':gap<-20?'#f6465d':'#848e9c';
+      const gapLabel=gap>40?'💎 HIGH ALPHA — Fundamentals say BUY, market in FEAR':gap>20?'Fundamentals ahead of sentiment':gap<-20?'Overvalued — sentiment exceeds fundamentals':'Aligned';
+      html+='<div style="grid-column:span 2;background:#181a20;border:1px solid '+gapCol+'44;border-radius:6px;padding:10px">';
+      html+='<div style="font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">Fundamental vs Sentiment</div>';
+      html+='<div style="display:flex;gap:12px;align-items:center;margin-bottom:4px">';
+      html+='<div style="flex:1"><div style="font-size:10px;color:#848e9c">Fundamental</div><div style="background:#2b2f36;height:10px;border-radius:5px;overflow:hidden"><div style="width:'+fs+'%;height:100%;background:#0ecb81;border-radius:5px"></div></div><div style="font-size:11px;font-weight:600;color:#0ecb81">'+fs+'/100</div></div>';
+      html+='<div style="flex:1"><div style="font-size:10px;color:#848e9c">Sentiment (F&G)</div><div style="background:#2b2f36;height:10px;border-radius:5px;overflow:hidden"><div style="width:'+sentNorm+'%;height:100%;background:'+(fg2>0?'#f6465d':'#0ecb81')+';border-radius:5px"></div></div><div style="font-size:11px;font-weight:600;color:'+(fg2>0?'#f6465d':'#0ecb81')+'">'+(fg2>0?'+':'')+fg2+' ('+zone(fg2)+')</div></div>';
+      html+='</div>';
+      html+='<div style="font-size:11px;color:'+gapCol+';font-weight:600">Gap: '+(gap>0?'+':'')+gap+' pts — '+gapLabel+'</div>';
+      html+='</div>';
+    }
 
     if(geo&&geo.total_holes>0){
       // LEFT: Drill Results + Reactions
