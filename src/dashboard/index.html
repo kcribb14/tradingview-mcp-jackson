@@ -338,12 +338,19 @@ function mapTV(sym,cat){
   if(cat?.includes('DEX'))return null;
   if(sym.endsWith('.AX'))return'ASX:'+sym.replace('.AX','');
   if(sym.endsWith('.L'))return'LSE:'+sym.replace('.L','');
+  if(sym.endsWith('.TO'))return'TSX:'+sym.replace('.TO','');
   if(sym==='GC=F')return'TVC:GOLD';if(sym==='SI=F')return'TVC:SILVER';if(sym==='CL=F')return'TVC:USOIL';
+  if(sym==='NG=F')return'TVC:NATURALGAS';if(sym==='HG=F')return'TVC:COPPER';if(sym==='PL=F')return'TVC:PLATINUM';
   if(sym.includes('='))return null;if(sym.startsWith('^'))return null;
-  const cm=new Set(['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR','ATOM']);
+  // Top 50 crypto → Binance
+  const cm=new Set(['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR',
+    'ATOM','FTM','ALGO','HBAR','APT','ARB','OP','SUI','SEI','TIA','INJ','PEPE','WLD','FET','RNDR','GRT','MKR','CRV',
+    'COMP','SNX','LDO','IMX','MANA','AXS','BONK','WIF','JUP','RAY','PYTH','SAND','MATIC','ENA','PENDLE','STRK','EIGEN']);
   if(cm.has(sym))return'BINANCE:'+sym+'USDT';
-  if(cat?.includes('Crypto'))return'BINANCE:'+sym+'USDT';
-  return sym;
+  if(cat?.includes('Crypto')&&sym.length<=6)return'BINANCE:'+sym+'USDT';
+  // Unknown crypto with long symbols — skip TV (likely not listed)
+  if(cat?.includes('Crypto'))return null;
+  return sym; // US stocks auto-resolve
 }
 
 // ─── Modal with synced TF between TradingView widget and F&G chart ─────────
@@ -368,12 +375,29 @@ const dgtZoneBands={id:'dgtZoneBands',beforeDraw(chart){
   }
 }};
 
+let tvWidgetTimer=null;
 function updateTVWidget(sym,interval){
-  const tvSym=mapTV(sym,dmCat);const container=document.getElementById('tvContainer');container.innerHTML='';
+  if(tvWidgetTimer){clearTimeout(tvWidgetTimer);tvWidgetTimer=null}
+  const tvSym=mapTV(sym,dmCat);
+  const container=document.getElementById('tvContainer');container.innerHTML='';
+  const top=document.getElementById('dmTop');
+  const bot=document.querySelector('.dm-bot');
   if(tvSym&&typeof TradingView!=='undefined'){
-    try{new TradingView.widget({container_id:'tvContainer',symbol:tvSym,interval:interval,theme:'dark',style:'1',locale:'en',toolbar_bg:'#181a20',enable_publishing:false,allow_symbol_change:false,hide_side_toolbar:false,width:'100%',height:'100%',backgroundColor:'#181a20'})}
-    catch{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Widget unavailable</div>'}
-  }else{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Chart unavailable for DEX token</div>'}
+    top.style.display='';top.style.height='50%';bot.style.height='50%';
+    try{
+      new TradingView.widget({container_id:'tvContainer',symbol:tvSym,interval:interval,theme:'dark',style:'1',locale:'en',toolbar_bg:'#181a20',enable_publishing:false,allow_symbol_change:false,hide_side_toolbar:false,width:'100%',height:'100%',backgroundColor:'#181a20'});
+      // Timeout: if iframe not loaded in 6s, hide TV and expand chart
+      tvWidgetTimer=setTimeout(()=>{
+        const iframe=container.querySelector('iframe');
+        if(!iframe||iframe.clientHeight<50){
+          top.style.display='none';bot.style.height='100%';
+        }
+      },6000);
+    }catch{top.style.display='none';bot.style.height='100%'}
+  }else{
+    // No TV widget — show Chart.js at full height
+    top.style.display='none';bot.style.height='100%';
+  }
 }
 
 function renderTFButtons(){
