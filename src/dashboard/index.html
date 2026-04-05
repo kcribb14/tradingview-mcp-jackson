@@ -645,20 +645,39 @@ let tvWidget=null;
 
 // Map our symbol to TradingView widget format
 function mapToTV(sym,cat){
+  // DEX-only tokens: no TV widget
+  if(cat?.includes('DEX'))return null;
+  // ASX: "BHP.AX" → "ASX:BHP"
   if(sym.endsWith('.AX'))return'ASX:'+sym.replace('.AX','');
+  // International exchanges
   if(sym.endsWith('.L'))return'LSE:'+sym.replace('.L','');
   if(sym.endsWith('.TO'))return'TSX:'+sym.replace('.TO','');
-  if(cat?.includes('DEX'))return null; // No TV widget for DEX tokens
-  if(sym.includes('=F'))return'CME:'+sym.replace('=F','1!');
+  if(sym.endsWith('.HK'))return'HKEX:'+sym.replace('.HK','');
+  if(sym.endsWith('.DE'))return'XETR:'+sym.replace('.DE','');
+  // Commodities
+  if(sym==='GC=F')return'TVC:GOLD';
+  if(sym==='SI=F')return'TVC:SILVER';
+  if(sym==='CL=F')return'TVC:USOIL';
+  if(sym==='NG=F')return'TVC:NATGAS';
+  if(sym==='HG=F')return'COMEX:HG1!';
+  if(sym==='PL=F')return'TVC:PLATINUM';
+  if(sym.includes('=F'))return null; // Unknown future
+  // Forex
   if(sym.includes('=X'))return'FX:'+sym.replace('=X','');
-  if(sym.startsWith('^'))return'TVC:'+sym.replace('^','');
-  // Crypto
-  const cryptoMajors=['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR','ATOM'];
-  if(cryptoMajors.includes(sym))return'BINANCE:'+sym+'USDT';
-  // US stocks — try NASDAQ first (most common)
-  const nyse=['JPM','V','JNJ','PG','HD','DIS','BA','GS','GE','CAT','HON','MMM','WFC','BAC','KO','PEP','MCD','WMT'];
-  if(nyse.includes(sym))return'NYSE:'+sym;
-  return'NASDAQ:'+sym;
+  // Indices
+  if(sym==='^GSPC')return'SP:SPX';
+  if(sym==='^DJI')return'DJ:DJI';
+  if(sym==='^VIX')return'TVC:VIX';
+  if(sym==='^AXJO')return'ASX:XJO';
+  if(sym.startsWith('^'))return null;
+  // Crypto majors → Binance
+  const cryptoMajors=new Set(['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR','ATOM','FTM','ALGO','SAND','HBAR','APT','ARB','OP','SUI']);
+  if(cryptoMajors.has(sym))return'BINANCE:'+sym+'USDT';
+  // Crypto mid — if classified as crypto, try Binance
+  if(cat?.includes('Crypto'))return'BINANCE:'+sym+'USDT';
+  // US stocks + ETFs: send WITHOUT exchange prefix — TradingView auto-resolves
+  return sym;
+}
 }
 
 async function openDetail(sym){
@@ -733,15 +752,42 @@ async function openDetail(sym){
   if(d3.fg?.length>0){
     const fgVals=d3.fg.map(f=>f.v);
     const fgLabels=d3.fg.map(f=>new Date(f.t).toLocaleDateString());
-    const fgColors=fgVals.map(v=>v<-25?'#ff5252':v<-10?'#ff9800':v<-5?'#c8b86a':v<5?'#A19F8F':v<10?'#65a095':v<41?'#50b050':'#2e8f2e');
+    // Price data aligned with F&G
+    const priceVals=d3.ohlcv?d3.ohlcv.map(b=>b.c):[];
+
     if(detailFGChart)detailFGChart.destroy();
+    const datasets=[
+      {// F&G line (colored by zone)
+        data:fgVals,yAxisID:'y',
+        segment:{borderColor:ctx=>{
+          const v=ctx.p1?.parsed?.y??0;
+          return v<-41?'#910000':v<-25?'#ff5252':v<-10?'#ff9800':v<-5?'#c8b86a':v<5?'#A19F8F':v<10?'#65a095':v<41?'#50b050':v<73?'#2e8f2e':'#006400';
+        }},
+        borderWidth:2,pointRadius:0,fill:false,order:1,
+      }
+    ];
+    // Add price line if available
+    if(priceVals.length===fgVals.length){
+      datasets.push({
+        data:priceVals,yAxisID:'y1',
+        borderColor:'rgba(240,185,11,0.4)',borderWidth:1,pointRadius:0,fill:false,order:2,
+      });
+    }
+
     detailFGChart=new Chart(document.getElementById('detailFGChart'),{
       type:'line',
-      data:{labels:fgLabels,datasets:[{data:fgVals,segment:{borderColor:ctx=>fgColors[ctx.p0DataIndex]||'#848e9c'},borderWidth:2,pointRadius:0,fill:false}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},
-        tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'F&G: '+(ctx.raw>0?'+':'')+ctx.raw.toFixed(1)}}},
-        scales:{x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:10}}},
-          y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c'}}}}
+      data:{labels:fgLabels,datasets},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},datalabels:{display:false},
+          tooltip:{callbacks:{label:ctx=>{
+            if(ctx.datasetIndex===0)return'F&G: '+(ctx.raw>0?'+':'')+ctx.raw.toFixed(1);
+            return'Price: $'+ctx.raw.toFixed(ctx.raw>=1?2:6);
+          }}}},
+        scales:{
+          x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:10}}},
+          y:{position:'right',grid:{color:'#1e232930'},ticks:{color:'#848e9c'},title:{display:true,text:'F&G',color:'#848e9c',font:{size:10}}},
+          y1:{position:'left',grid:{display:false},ticks:{color:'#f0b90b50',callback:v=>'$'+v.toFixed(priceVals[0]>=1?0:4)},title:{display:true,text:'Price',color:'#f0b90b50',font:{size:10}}},
+        }}
     });
   }
 }
