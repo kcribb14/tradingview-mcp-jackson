@@ -736,76 +736,136 @@ async function loadTrending(){
 }
 
 // ─── Cycle View ─────────────────────────────────────────────────────────────
+const cycleCharts={};
 async function loadCycle(){
   const el=document.getElementById('cycleContent');
-  el.innerHTML='Loading cycle data...';
+  el.innerHTML='<div style="text-align:center;padding:20px;color:#848e9c">Loading cycle data...</div>';
+  Object.values(cycleCharts).forEach(c=>c.destroy());for(const k in cycleCharts)delete cycleCharts[k];
   try{
-    const r=await fetch('/api/cycle');
-    const d=await r.json();
+    const [cycleR, histR]=await Promise.all([fetch('/api/cycle'),fetch('/api/cycle-history').catch(()=>null)]);
+    const d=await cycleR.json();
+    const hist=histR?await histR.json():{snapshots:[]};
     let html='';
 
-    // Phase banner
-    const phaseCol=d.phase.includes('RISK OFF')?'#f6465d':d.phase.includes('RISK ON')?'#0ecb81':'#f0b90b';
-    html+='<div style="background:#181a20;border:2px solid '+phaseCol+';border-radius:8px;padding:12px 16px;margin-bottom:16px;text-align:center"><span style="font-size:16px;font-weight:700;color:'+phaseCol+'">'+d.phase+'</span></div>';
+    // ─── THREE GAUGES ───
+    const avgFG=d.stages?.reduce((s,st)=>s+(st.fg||0),0)/Math.max(1,d.stages?.filter(s=>s.fg!=null).length||1);
+    const asPct=d.altSeason?.pct||0;
+    const safetyFG=d.stages?.[0]?.fg||0;const cryptoFG=d.stages?.[4]?.fg||0;
+    const riskSpread=Math.round((safetyFG-cryptoFG)*10)/10;
+    const riskPct=Math.max(0,Math.min(100,50-riskSpread)); // 0=max risk off, 100=max risk on
 
-    // Rotation pipeline
+    html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px">';
+
+    // Gauge 1: Market F&G
+    const mfgNorm=Math.max(0,Math.min(100,Math.round((avgFG+50)/100*100)));
+    const mfgCol=avgFG<=-15?'#f6465d':avgFG<=-5?'#ff9800':avgFG>=15?'#0ecb81':avgFG>=5?'#2e8f2e':'#f0b90b';
+    const mfgLabel=avgFG<=-15?'DEEP FEAR':avgFG<=-5?'FEAR':avgFG>=15?'GREED':avgFG>=5?'OPTIMISM':'NEUTRAL';
+    html+='<div style="background:#181a20;border:1px solid #2b2f36;border-radius:8px;padding:16px;text-align:center">';
+    html+='<div style="font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Market F&G Cycle</div>';
+    html+='<canvas id="gauge1" width="220" height="130" style="margin:0 auto;display:block"></canvas>';
+    html+='<div style="font-size:28px;font-weight:700;color:'+mfgCol+';margin-top:-20px">'+(avgFG>0?'+':'')+avgFG.toFixed(1)+'</div>';
+    html+='<div style="font-size:12px;color:'+mfgCol+';font-weight:600">'+mfgLabel+'</div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#5e6673;margin-top:6px"><span>Fear</span><span>Greed</span></div>';
+    html+='</div>';
+
+    // Gauge 2: Alt Season
+    const asCol=asPct>=75?'#0ecb81':asPct<=25?'#f0b90b':'#848e9c';
+    const asLabel=asPct>=75?'ALT SEASON':asPct<=25?'BTC SEASON':'NEUTRAL';
+    html+='<div style="background:#181a20;border:1px solid #2b2f36;border-radius:8px;padding:16px;text-align:center">';
+    html+='<div style="font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Altcoin Season Index</div>';
+    html+='<canvas id="gauge2" width="220" height="130" style="margin:0 auto;display:block"></canvas>';
+    html+='<div style="font-size:28px;font-weight:700;color:'+asCol+';margin-top:-20px">'+asPct+'%</div>';
+    html+='<div style="font-size:12px;color:'+asCol+';font-weight:600">'+asLabel+'</div>';
+    html+='<div style="font-size:9px;color:#5e6673;margin-top:4px">'+d.altSeason?.altsAbove+'/'+d.altSeason?.altsTotal+' alts beat BTC</div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#5e6673;margin-top:4px"><span>BTC Season</span><span>Alt Season</span></div>';
+    html+='</div>';
+
+    // Gauge 3: Risk Appetite
+    const raCol=riskPct>=60?'#0ecb81':riskPct<=30?'#f6465d':'#f0b90b';
+    const raLabel=riskPct>=60?'RISK ON':riskPct<=30?'RISK OFF':'CAUTIOUS';
+    html+='<div style="background:#181a20;border:1px solid #2b2f36;border-radius:8px;padding:16px;text-align:center">';
+    html+='<div style="font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Risk Appetite</div>';
+    html+='<canvas id="gauge3" width="220" height="130" style="margin:0 auto;display:block"></canvas>';
+    html+='<div style="font-size:28px;font-weight:700;color:'+raCol+';margin-top:-20px">'+raLabel+'</div>';
+    html+='<div style="font-size:11px;color:#848e9c;margin-top:4px">Safety: '+(safetyFG>0?'+':'')+safetyFG.toFixed(1)+' | Crypto: '+(cryptoFG>0?'+':'')+cryptoFG.toFixed(1)+'</div>';
+    html+='<div style="font-size:9px;color:#5e6673">Spread: '+riskSpread+' pts</div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#5e6673;margin-top:4px"><span>Risk Off</span><span>Risk On</span></div>';
+    html+='</div>';
+    html+='</div>';
+
+    // ─── PHASE BANNER ───
+    const phaseCol=d.phase.includes('RISK OFF')?'#f6465d':d.phase.includes('RISK ON')?'#0ecb81':'#f0b90b';
+    html+='<div style="background:#181a20;border:2px solid '+phaseCol+'44;border-radius:8px;padding:10px 16px;margin-bottom:16px;text-align:center"><span style="font-size:14px;font-weight:700;color:'+phaseCol+'">'+d.phase+'</span></div>';
+
+    // ─── ROTATION PIPELINE ───
     html+='<div class="sig-section"><div class="sig-title">ROTATION PIPELINE</div>';
-    html+='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;justify-content:center;margin:12px 0">';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:center;margin:12px 0">';
     d.stages.forEach((s,i)=>{
       const col=s.status==='greed'?'#0ecb81':s.status==='neutral'?'#f0b90b':s.status==='fear'?'#ff9800':'#f6465d';
-      const bg=s.status==='greed'?'#0ecb8115':s.status==='neutral'?'#f0b90b15':'#f6465d15';
-      html+='<div style="background:'+bg+';border:1px solid '+col+'44;border-radius:6px;padding:8px 12px;text-align:center;min-width:110px">';
-      html+='<div style="font-size:16px">'+s.emoji+'</div>';
-      html+='<div style="font-size:11px;font-weight:600;color:#eaecef">'+s.name+'</div>';
-      html+='<div style="font-size:14px;font-weight:700;color:'+col+'">'+(s.fg!=null?(s.fg>0?'+':'')+s.fg.toFixed(1):'—')+'</div>';
+      const bg=s.status==='greed'?'#0ecb8110':s.status==='neutral'?'#f0b90b10':'#f6465d10';
+      html+='<div style="background:'+bg+';border:1px solid '+col+'44;border-radius:8px;padding:10px 14px;text-align:center;min-width:120px;cursor:pointer" onclick="switchView(\'scanner\');switchCat(\'\')">';
+      html+='<div style="font-size:18px">'+s.emoji+'</div>';
+      html+='<div style="font-size:12px;font-weight:600;color:#eaecef">'+s.name+'</div>';
+      html+='<div style="font-size:18px;font-weight:700;color:'+col+';margin-top:2px">'+(s.fg!=null?(s.fg>0?'+':'')+s.fg.toFixed(1):'—')+'</div>';
       html+='</div>';
-      if(i<d.stages.length-1)html+='<span style="color:#5e6673;font-size:18px">→</span>';
+      if(i<d.stages.length-1)html+='<span style="color:#5e6673;font-size:20px">→</span>';
     });
     html+='</div></div>';
 
-    // Lead-Lag table
+    // ─── MARKET BREADTH BARS ───
+    html+='<div class="sig-section"><div class="sig-title">MARKET BREADTH — % Above 144 EMA</div>';
+    const globalBreadth=Object.values(d.breadth||{});
+    const avgBreadth=globalBreadth.length>0?Math.round(globalBreadth.reduce((a,b)=>a+b,0)/globalBreadth.length):0;
+    const abCol=avgBreadth>=50?'#0ecb81':avgBreadth>=30?'#f0b90b':'#f6465d';
+    html+='<div style="font-size:12px;margin-bottom:8px">Global: <b style="color:'+abCol+'">'+avgBreadth+'%</b> <span style="color:#5e6673">(below 30% = deep fear, above 70% = euphoria)</span></div>';
+    for(const [g,pct] of Object.entries(d.breadth||{})){
+      const col2=pct>=50?'#0ecb81':pct>=30?'#f0b90b':'#f6465d';
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0"><span style="width:60px;font-size:11px">'+g+'</span><div style="flex:1;background:#2b2f36;height:10px;border-radius:5px;overflow:hidden"><div style="background:'+col2+';height:100%;width:'+pct+'%;border-radius:5px;transition:.3s"></div></div><span style="color:'+col2+';font-weight:600;font-size:12px;width:40px;text-align:right">'+pct+'%</span></div>';
+    }
+    html+='</div>';
+
+    // ─── LEAD-LAG ───
     html+='<div class="sig-section"><div class="sig-title">LEAD-LAG ANALYSIS</div>';
-    html+='<table class="sig-table"><tr><th>Leader</th><th>F&G</th><th>Follower</th><th>F&G</th><th>Gap</th><th>Signal</th></tr>';
+    html+='<table class="sig-table"><tr><th>Leader</th><th>F&G</th><th>→</th><th>Follower</th><th>F&G</th><th>Gap</th><th>Signal</th></tr>';
     d.leadLag.forEach(l=>{
-      const gapCol=l.gap>10?'#0ecb81':l.gap<-10?'#f6465d':'#848e9c';
-      html+='<tr><td style="font-weight:600">'+l.names[0]+'</td><td>'+fgBadge(l.leaderFG)+'</td><td style="font-weight:600">'+l.names[1]+'</td><td>'+fgBadge(l.followerFG)+'</td><td style="color:'+gapCol+';font-weight:600">'+(l.gap!=null?l.gap:'—')+'</td><td style="font-size:11px;color:#848e9c">'+l.signal+'</td></tr>';
+      const gapCol=Math.abs(l.gap||0)>10?'#0ecb81':'#848e9c';
+      html+='<tr><td style="font-weight:600">'+l.names[0]+'</td><td>'+fgBadge(l.leaderFG)+'</td><td style="color:#5e6673">→</td><td style="font-weight:600">'+l.names[1]+'</td><td>'+fgBadge(l.followerFG)+'</td><td style="color:'+gapCol+';font-weight:600">'+(l.gap!=null?(l.gap>0?'+':'')+l.gap:'—')+'</td><td style="font-size:11px;color:#848e9c">'+l.signal+'</td></tr>';
     });
     html+='</table></div>';
 
-    // Altcoin Season + Breadth side by side
-    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">';
-
-    // Alt season gauge
-    const asPct=d.altSeason.pct;const asCol=asPct>=75?'#0ecb81':asPct<=25?'#f0b90b':'#848e9c';
-    html+='<div class="sig-section" style="margin-bottom:0"><div class="sig-title">ALTCOIN SEASON</div>';
-    html+='<div style="text-align:center;padding:8px"><div style="font-size:24px;font-weight:700;color:'+asCol+'">'+d.altSeason.label+'</div>';
-    html+='<div style="background:#2b2f36;border-radius:4px;height:8px;margin:8px 0;position:relative"><div style="background:'+asCol+';height:100%;border-radius:4px;width:'+asPct+'%"></div></div>';
-    html+='<div style="display:flex;justify-content:space-between;font-size:10px;color:#5e6673"><span>BTC Season</span><span>'+asPct+'% alts beat BTC</span><span>Alt Season</span></div>';
-    html+='</div></div>';
-
-    // Breadth
-    html+='<div class="sig-section" style="margin-bottom:0"><div class="sig-title">MARKET BREADTH (% above EMA)</div>';
-    for(const [g,pct] of Object.entries(d.breadth||{})){
-      const col2=pct>=50?'#0ecb81':pct>=30?'#f0b90b':'#f6465d';
-      html+='<div style="display:flex;justify-content:space-between;padding:3px 0"><span>'+g+'</span><div style="display:flex;align-items:center;gap:6px"><div style="background:#2b2f36;width:80px;height:6px;border-radius:3px"><div style="background:'+col2+';height:100%;border-radius:3px;width:'+pct+'%"></div></div><span style="color:'+col2+';font-weight:600;font-size:11px">'+pct+'%</span></div></div>';
-    }
-    html+='</div>';
-    html+='</div>';
-
-    // Mining rotation
-    html+='<div class="sig-section"><div class="sig-title">MINING SECTOR ROTATION</div>';
-    html+='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;justify-content:center">';
+    // ─── MINING ROTATION (clickable) ───
+    html+='<div class="sig-section"><div class="sig-title">MINING SECTOR ROTATION — Click to filter</div>';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:center">';
     d.mining.forEach((m,i)=>{
       const mc=m.fg==null?'#848e9c':m.fg>=10?'#0ecb81':m.fg>=-5?'#f0b90b':m.fg>=-15?'#ff9800':'#f6465d';
-      html+='<div style="background:#1e2329;border:1px solid #2b2f36;border-radius:4px;padding:6px 10px;text-align:center;min-width:90px">';
+      html+='<div style="background:#1e2329;border:1px solid #2b2f36;border-radius:6px;padding:8px 12px;text-align:center;min-width:95px;cursor:pointer" onclick="switchView(\'scanner\')">';
       html+='<div style="font-size:10px;color:#848e9c">'+m.name+'</div>';
-      html+='<div style="font-size:13px;font-weight:700;color:'+mc+'">'+(m.fg!=null?(m.fg>0?'+':'')+m.fg.toFixed(1):'—')+'</div></div>';
+      html+='<div style="font-size:16px;font-weight:700;color:'+mc+'">'+(m.fg!=null?(m.fg>0?'+':'')+m.fg.toFixed(1):'—')+'</div></div>';
       if(i<d.mining.length-1)html+='<span style="color:#5e6673">→</span>';
     });
     html+='</div></div>';
 
+    // ─── HISTORICAL NOTE ───
+    const snapCount=hist.snapshots?.length||0;
+    if(snapCount<7){
+      html+='<div style="padding:12px;background:#1e2329;border-radius:6px;font-size:11px;color:#5e6673;text-align:center;margin-top:8px">Historical charts will populate as daily snapshots accumulate. Currently '+snapCount+' day(s) of data. Full charts appear after 7+ days.</div>';
+    }
+
     el.innerHTML=html;
-  }catch(e){el.innerHTML='Error: '+e.message}
+
+    // ─── DRAW GAUGES with Chart.js doughnut ───
+    function drawGauge(canvasId, value, colors){
+      const cv=document.getElementById(canvasId);if(!cv)return;
+      const pct=Math.max(0,Math.min(100,value));
+      cycleCharts[canvasId]=new Chart(cv,{type:'doughnut',data:{datasets:[{
+        data:[pct,100-pct],backgroundColor:[colors[0],'rgba(43,47,54,0.5)'],borderWidth:0,circumference:180,rotation:270
+      }]},options:{responsive:false,maintainAspectRatio:false,cutout:'72%',plugins:{legend:{display:false},tooltip:{enabled:false},datalabels:{display:false}}}});
+    }
+    drawGauge('gauge1',mfgNorm,[mfgCol]);
+    drawGauge('gauge2',asPct,[asCol]);
+    drawGauge('gauge3',riskPct,[raCol]);
+
+  }catch(e){el.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
 }
 
 // ─── View switching ─────────────────────────────────────────────────────────

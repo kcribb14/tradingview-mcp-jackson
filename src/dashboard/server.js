@@ -651,6 +651,19 @@ app.get('/api/cycle', (req, res) => {
   res.json({ stages, phase, leadLag, altSeason: { pct: altSeasonPct, label: altSeason, btcFG, altsAbove: altsBeatBTC, altsTotal: altScores.length }, mining, breadth: DATA.stats.breadth });
 });
 
+// Cycle history from saved snapshots
+app.get('/api/cycle-history', (req, res) => {
+  try {
+    const histDir = join(HOME, '.tradingview-mcp', 'history');
+    if (!existsSync(histDir)) return res.json({ snapshots: [] });
+    const files = readdirSync(histDir).filter(f => f.startsWith('snapshot-') && f.endsWith('.json')).sort();
+    const snapshots = files.map(f => {
+      try { return JSON.parse(readFileSync(join(histDir, f), 'utf8')); } catch { return null; }
+    }).filter(Boolean);
+    res.json({ snapshots, count: snapshots.length });
+  } catch (e) { res.json({ snapshots: [], error: e.message }); }
+});
+
 app.post('/api/open-in-tv', async (req, res) => {
   try {
     const { setSymbol } = await import('../core/chart.js');
