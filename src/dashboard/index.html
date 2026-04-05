@@ -139,8 +139,8 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
   <button class="btn" onclick="applyPreset('entry')">Entry Zones</button>
   <button class="btn" onclick="applyPreset('greed')">Greed</button>
-  <button class="btn" onclick="applyPreset('whale')">🐋 Whale</button>
-  <button class="btn" onclick="applyPreset('smart')">🎯 Smart 60+</button>
+  <button class="btn" onclick="applyPreset('whale')" title="High volume during fear = institutional accumulation">🐋 Whale Vol</button>
+  <button class="btn" onclick="applyPreset('smart')" title="Multi-factor score combining F&G depth, volume, RSI, momentum">🎯 Smart 60+</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view -->
@@ -373,7 +373,7 @@ function renderTable(){
     {k:'z',l:'Zone',tt:'DGT zones: Despondency < Panic < Fear < Anxiety < Balanced < Optimism < Excitement < Thrill < Euphoria'},
     {k:'',l:'Trend',tt:'Cross-TF trend: 15m→1H→4H→Daily→Weekly. Green=improving, Red=worsening'},
     {k:'w',l:'Signal',tt:'ENTRY: F&G below 10th pctl for asset class. EXIT: above 75th pctl.'},
-    {k:'wh',l:'Whale',tt:'ACC=Accumulation (high volume during fear). DIST=Distribution (high volume during greed).'}
+    {k:'wh',l:'Whale',tt:'🐋 ACC = Volume >3x 20-day average during fear (smart money buying). 🔴 DIST = High volume during greed (distribution).'}
   ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
   document.getElementById('thead').innerHTML=cols.map(c=>{
@@ -851,9 +851,7 @@ async function loadCycle(){
       html+='<div style="padding:12px;background:#1e2329;border-radius:6px;font-size:11px;color:#5e6673;text-align:center;margin-top:8px">Historical charts will populate as daily snapshots accumulate. Currently '+snapCount+' day(s) of data. Full charts appear after 7+ days.</div>';
     }
 
-    el.innerHTML=html;
-
-    // ─── DRAW GAUGES with Chart.js doughnut ───
+    // ─── DRAW GAUGES with Chart.js doughnut ─── (defined here, called after innerHTML set)
     function drawGauge(canvasId, value, colors){
       const cv=document.getElementById(canvasId);if(!cv)return;
       const pct=Math.max(0,Math.min(100,value));
@@ -959,7 +957,7 @@ function switchView(view){
   const nav=document.getElementById('nav'+view.charAt(0).toUpperCase()+view.slice(1));
   if(nav)nav.classList.add('active');
   // Load view data
-  if(view==='scanner'){renderScatter();renderTFBar();renderCatBar();renderTable()}
+  if(view==='scanner'){setTimeout(()=>{renderScatter();renderTFBar();renderCatBar();renderTable()},50)}
   if(view==='watchgrid')loadWatchlistGrid();
   if(view==='signals')loadSignals();
   if(view==='cycle')loadCycle();
