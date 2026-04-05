@@ -496,13 +496,13 @@ function renderTFButtons(){
     return'<button class="btn" style="font-size:10px;padding:2px 6px;min-width:32px;'
       +(active?'background:#f0b90b;color:#0b0e11;':'')
       +(!cached&&!active?'border:1px dashed #333;':'')
-      +'" onclick="switchTF(\''+tf+'\')"'
+      +'" onclick="switchModalTF(\''+tf+'\')"'
       +(!cached?' title="Will fetch on click"':'')
       +'>'+TF_LABELS[tf]+'</button>';
   }).join('');
 }
 
-async function switchTF(tf){
+async function switchModalTF(tf){
   dmTF=tf;renderTFButtons();
   updateTVWidget(dmSym,TV_INTERVALS[tf]||'D');
   await loadFGChart(dmSym,tf);
