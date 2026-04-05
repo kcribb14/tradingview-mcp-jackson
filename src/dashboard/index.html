@@ -223,8 +223,9 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
     <span style="color:#2b2f36;margin:0 4px">|</span>
     <div style="display:flex;gap:4px">
       <button class="btn" onclick="switchWgView('grid')" id="wgViewGrid">Individual</button>
-      <button class="btn active" onclick="switchWgView('overlay')" id="wgViewOverlay">F&G Overlay</button>
+      <button class="btn" onclick="switchWgView('overlay')" id="wgViewOverlay">F&G</button>
       <button class="btn" onclick="switchWgView('price')" id="wgViewPrice">Price %</button>
+      <button class="btn active" onclick="switchWgView('both')" id="wgViewBoth">Both</button>
     </div>
     <span style="color:#2b2f36;margin:0 4px">|</span>
     <div style="display:flex;gap:3px">
@@ -237,7 +238,13 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
     </div>
   </div>
   <div id="wgInsights" style="font-size:11px;color:#848e9c;padding:4px 8px;margin-bottom:8px;background:#181a20;border-radius:6px;display:none"></div>
-  <div id="wgOverlayContainer" style="position:relative;height:450px;background:#181a20;border:1px solid #2b2f36;border-radius:8px;margin-bottom:12px;display:none"><canvas id="wgOverlayChart"></canvas></div>
+  <div id="wgOverlayContainer" style="background:#181a20;border:1px solid #2b2f36;border-radius:8px;margin-bottom:12px;display:none">
+    <div id="wgSingleChartBox" style="position:relative;height:420px"><canvas id="wgOverlayChart"></canvas></div>
+    <div id="wgBothBox" style="display:none">
+      <div style="position:relative;height:240px;border-bottom:1px solid #2b2f36"><canvas id="wgPriceOverlay"></canvas></div>
+      <div style="position:relative;height:200px"><canvas id="wgFGOverlay2"></canvas></div>
+    </div>
+  </div>
   <div id="wgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:10px"></div>
   <div id="wgEmpty" style="text-align:center;padding:40px;color:#848e9c;display:none">No watchlist symbols. Star ★ symbols from the Scanner to add them here.</div>
 </div>
@@ -1502,22 +1509,27 @@ function switchView(view){
 let wgTF='D';const wgCharts={};let wgView='overlay';let wgOverlayChart=null;let wgRange=90;let wgDataCache={};
 const WG_COLORS=['#f7931a','#627eea','#00ffa3','#a2aaad','#ffffff','#cc0000','#76b900','#ffd700','#ff6600','#e91e63','#00bcd4','#9c27b0'];
 
+let wgPriceChart2=null,wgFGChart3=null;
 function switchWgView(view){
   wgView=view;
   document.getElementById('wgViewGrid').classList.toggle('active',view==='grid');
   document.getElementById('wgViewOverlay').classList.toggle('active',view==='overlay');
   document.getElementById('wgViewPrice').classList.toggle('active',view==='price');
+  document.getElementById('wgViewBoth').classList.toggle('active',view==='both');
   document.getElementById('wgGrid').style.display=view==='grid'?'grid':'none';
   document.getElementById('wgOverlayContainer').style.display=view!=='grid'?'block':'none';
-  if(view!=='grid')renderWgOverlay();
-  else loadWatchlistGrid();
+  document.getElementById('wgSingleChartBox').style.display=(view==='overlay'||view==='price')?'':'none';
+  document.getElementById('wgBothBox').style.display=view==='both'?'':'none';
+  if(view==='grid')loadWatchlistGrid();
+  else renderWgOverlay();
 }
 
 function setWgRange(days){
   wgRange=days;
   document.querySelectorAll('#viewWatchgrid .btn[onclick*=setWgRange]').forEach(b=>b.classList.remove('active'));
-  if(days>0){const btn=document.querySelector('#viewWatchgrid .btn[onclick*="setWgRange('+days+')"]');if(btn)btn.classList.add('active')}
-  renderWgOverlay();
+  const btn=document.querySelector('#viewWatchgrid .btn[onclick*="setWgRange('+days+')"]');
+  if(btn)btn.classList.add('active');
+  if(wgView!=='grid')renderWgOverlay();
 }
 
 async function renderWgOverlay(){
@@ -1539,8 +1551,11 @@ async function renderWgOverlay(){
   }));
 
   if(wgOverlayChart){wgOverlayChart.destroy();wgOverlayChart=null}
-  const cv=document.getElementById('wgOverlayChart');
+  if(wgPriceChart2){wgPriceChart2.destroy();wgPriceChart2=null}
+  if(wgFGChart3){wgFGChart3.destroy();wgFGChart3=null}
   const isPrice=wgView==='price';
+  const isBoth=wgView==='both';
+  const cv=isBoth?null:document.getElementById('wgOverlayChart');
 
   // Find common date range
   const allDates=new Set();
@@ -1596,14 +1611,40 @@ async function renderWgOverlay(){
     title:{display:true,text:'F&G Score',color:'#5e6673',font:{size:10}}
   };
 
-  wgOverlayChart=new Chart(cv,{type:'line',data:{labels,datasets},
-    plugins:isPrice?[]:[dgtZoneBands],
-    options:{responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:true,position:'top',labels:{color:'#eaecef',font:{size:10},usePointStyle:true,pointStyle:'line'}},
-        datalabels:{display:false},
-        tooltip:{callbacks:{label:ctx=>{const v=ctx.raw;if(v==null)return null;return ctx.dataset.label+': '+(isPrice?(v>0?'+':'')+v+'%':(v>0?'+':'')+v.toFixed(1))}}}},
-      scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:10,font:{size:9}}},y:yConfig}}});
+  const chartOpts=(yConf,plugins)=>({responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:true,position:'top',labels:{color:'#eaecef',font:{size:9},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false},
+      zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}},
+      tooltip:{callbacks:{label:ctx=>{const v=ctx.raw;if(v==null)return null;const lbl=ctx.dataset.label;return lbl+': '+(yConf===yConfig?(isPrice?(v>0?'+':'')+v+'%':(v>0?'+':'')+v.toFixed(1)):(v>0?'+':'')+v.toFixed(1))}}}},
+    scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:8,font:{size:9}}},y:yConf}});
+
+  if(isBoth){
+    // Build separate price and FG datasets
+    const pDs=[],fDs=[];
+    FAVS.forEach((sym,i)=>{
+      const d=allData[sym];if(!d)return;
+      const color=WG_COLORS[i%WG_COLORS.length];
+      // Price % dataset
+      if(d.ohlcv?.length>0){
+        const vMap=new Map();d.ohlcv.forEach(p=>vMap.set(p.t,p.c));
+        const firstVal=dates.map(t=>vMap.get(t)).find(v=>v!=null);
+        const pData=dates.map(t=>{const v=vMap.get(t);return v!=null&&firstVal?Math.round((v/firstVal-1)*10000)/100:null});
+        pDs.push({label:sym,data:pData,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
+      }
+      // FG dataset
+      if(d.fg?.length>0){
+        const fMap=new Map();d.fg.forEach(p=>fMap.set(p.t,p.v));
+        const fData=dates.map(t=>fMap.get(t)??null);
+        fDs.push({label:sym,data:fData,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
+      }
+    });
+    const priceY={grid:{color:'#1e232920'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v+'%',font:{size:9}},title:{display:true,text:'Price %',color:'#5e6673',font:{size:9}}};
+    const fgY={min:-60,max:100,grid:{color:'#1e232920'},ticks:{color:'#848e9c',font:{size:9}},title:{display:true,text:'F&G',color:'#5e6673',font:{size:9}}};
+    wgPriceChart2=new Chart(document.getElementById('wgPriceOverlay'),{type:'line',data:{labels,datasets:pDs},options:chartOpts(priceY,[])});
+    wgFGChart3=new Chart(document.getElementById('wgFGOverlay2'),{type:'line',data:{labels,datasets:fDs},plugins:[dgtZoneBands],options:chartOpts(fgY,[dgtZoneBands])});
+  }else{
+    wgOverlayChart=new Chart(cv,{type:'line',data:{labels,datasets},
+      plugins:isPrice?[]:[dgtZoneBands],options:chartOpts(yConfig,isPrice?[]:[dgtZoneBands])});
+  }
 
   // Insights
   renderWgInsights(allData);
