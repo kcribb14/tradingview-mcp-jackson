@@ -188,8 +188,9 @@ async function loadScatter(){
 
 function render(){
   const s=D.stats;
+  const tfCount = cTF==='Daily' ? (s.total||0) : (D.tfCounts?.[cTF]||0);
   document.getElementById('meta').textContent=
-    (s.total||0).toLocaleString()+' symbols · '+cTF+' · '+(D.updated?new Date(D.updated).toLocaleTimeString():'');
+    tfCount.toLocaleString()+' symbols · '+cTF+' · '+(D.updated?new Date(D.updated).toLocaleTimeString():'');
   renderSidebar();renderTFBar();renderCatBar();renderTable();
   document.getElementById('statusBar').textContent=
     'Connected | '+(s.total||0)+' symbols | Updated: '+(D.updated?new Date(D.updated).toLocaleTimeString():'never');
@@ -246,8 +247,8 @@ function renderSidebar(){
 function renderTFBar(){
   const tc=D.tfCounts||{};
   document.getElementById('tfBar').innerHTML=TFS.map(tf=>{
-    const n=tc[tf]||0;const a=tf===cTF;const dim=tf!=='Daily'&&n===0;
-    return'<button class="tf-btn '+(a?'active':'')+'" style="'+(dim?'opacity:.35;pointer-events:none':'')+'" onclick="switchTF(\''+tf+'\')">'+tf+'<span class="cnt">('+n+')</span></button>';
+    const n=tc[tf]||0;const a=tf===cTF;
+    return'<button class="tf-btn '+(a?'active':'')+'" onclick="switchTF(\''+tf+'\')">'+tf+'<span class="cnt">('+n.toLocaleString()+')</span></button>';
   }).join('');
 }
 
@@ -261,8 +262,9 @@ function renderCatBar(){
 function renderScatter(){
   const canvas=document.getElementById('scatter');
   const ct=canvas.parentElement;canvas.width=ct.clientWidth;canvas.height=ct.clientHeight;
-  const dots=(D.scatterDots||[]).filter(r=>r.m>0);
   const fk=tfKey[cTF]||'f';
+  // Only show dots that have data for the selected timeframe
+  const dots=(D.scatterDots||[]).filter(r=>r.m>0&&(fk==='f'||r[fk]!=null));
   // Labels: top by mcap + extremes. Limit total to avoid overlap.
   const labelSet=new Set();
   const maxLabels=Math.min(25, Math.ceil(dots.length*0.05));
