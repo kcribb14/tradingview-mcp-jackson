@@ -83,6 +83,12 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 .sig-topbar .tb-pill .tb-val{font-size:16px;font-weight:700;display:block}
 .sig-table{width:100%;border-collapse:collapse;font-size:12px}.sig-table th{text-align:left;color:#848e9c;padding:4px 8px;border-bottom:1px solid #2b2f36}
 .sig-table td{padding:4px 8px;border-bottom:1px solid #1e2329}
+/* Tab hiding: use visibility+height instead of display:none so Chart.js canvases keep dimensions */
+.tab-hidden{visibility:hidden;height:0;overflow:hidden;position:absolute;width:100%;pointer-events:none}
+.tab-visible{visibility:visible;height:auto;overflow:visible;position:relative;pointer-events:auto}
+/* Scanner elements hidden class */
+.scanner-hidden{visibility:hidden;height:0;overflow:hidden;position:absolute;width:100%;pointer-events:none}
+.scanner-visible{visibility:visible;height:auto;overflow:visible;position:relative;pointer-events:auto}
 @media(max-width:768px){
   .hdr{flex-direction:column;padding:8px 12px;gap:4px}
   .hdr h1{font-size:15px}
@@ -127,13 +133,13 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
     <button class="btn btn-g" onclick="refresh()">⟳</button>
   </div>
 </div>
-<div class="tf-bar" id="tfBar" style="display:none"></div>
-<div class="main" id="mainArea" style="display:none">
+<div class="tf-bar scanner-hidden" id="tfBar"></div>
+<div class="main scanner-hidden" id="mainArea">
   <div class="sidebar" id="sidebar"></div>
   <div class="chart-area"><div class="chart-box"><canvas id="scatter"></canvas></div></div>
 </div>
-<div class="cat-bar" id="catBar" style="display:none"></div>
-<div class="filters" id="filters" style="display:none">
+<div class="cat-bar scanner-hidden" id="catBar"></div>
+<div class="filters scanner-hidden" id="filters">
   <input id="search" placeholder="Search symbol..." oninput="renderTable()">
   <button class="btn" onclick="applyPreset('fear')">Fear</button>
   <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
@@ -144,12 +150,12 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view -->
-<div id="viewScanner" style="display:none">
+<div id="viewScanner" class="tab-hidden">
 <div id="sectorBar" style="display:none;padding:8px 16px;background:#181a20;border-bottom:1px solid #2b2f36;font-size:12px"></div>
 <div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 </div>
 <!-- Watchlist Grid view -->
-<div id="viewWatchgrid" style="display:none;padding:12px">
+<div id="viewWatchgrid" class="tab-hidden" style="padding:12px">
   <div style="display:flex;gap:4px;margin-bottom:10px;justify-content:center" id="wgTFBar">
     <button class="btn active" onclick="switchWgTF('D')">Daily</button>
     <button class="btn" onclick="switchWgTF('60')">1H</button>
@@ -161,18 +167,18 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <div id="wgEmpty" style="text-align:center;padding:40px;color:#848e9c;display:none">No watchlist symbols. Star ★ symbols from the Scanner to add them here.</div>
 </div>
 <!-- Signals view (DEFAULT) -->
-<div id="viewSignals" style="padding:12px;max-width:1200px;margin:0 auto">
+<div id="viewSignals" class="tab-visible" style="padding:12px;max-width:1200px;margin:0 auto">
   <div id="signalsContent" style="color:#848e9c">Loading signals...</div>
 </div>
 <!-- Cycle view -->
-<div id="viewCycle" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
+<div id="viewCycle" class="tab-hidden" style="padding:12px;max-width:1200px;margin:0 auto">
   <div id="cycleContent" style="color:#848e9c">Loading cycle data...</div>
 </div>
 <!-- Trending view -->
-<div id="viewTrending" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
+<div id="viewTrending" class="tab-hidden" style="padding:12px;max-width:1200px;margin:0 auto">
   <div id="trendingContent" style="color:#848e9c">Loading trending...</div>
 </div>
-<div class="pager" id="pager" style="display:none"></div>
+<div class="pager scanner-hidden" id="pager"></div>
 <div style="padding:8px 16px;font-size:10px;color:#5e6673;border-top:1px solid #1e2329;margin-top:4px">
 DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate of return, money flow, volatility, gold. Backtest-validated on 149 symbols: +114% avg return, 69% WR, Sharpe 2.15 (p<0.01). Data: on-demand from Yahoo/Binance, cached with TTL-based freshness.
 </div>
@@ -947,17 +953,24 @@ const scannerEls=['tfBar','sidebar','catBar','filters','pager']; // elements to 
 
 function switchView(view){
   curView=view;
-  // Toggle view containers
-  viewEls.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=id==='view'+view.charAt(0).toUpperCase()+view.slice(1)?'':'none'});
-  // Show/hide scanner-specific elements
+  // Toggle view containers using visibility classes (NOT display:none — preserves Chart.js canvas dimensions)
+  viewEls.forEach(id=>{
+    const el=document.getElementById(id);if(!el)return;
+    const active=id==='view'+view.charAt(0).toUpperCase()+view.slice(1);
+    el.className=el.className.replace(/tab-hidden|tab-visible/g,'').trim()+' '+(active?'tab-visible':'tab-hidden');
+  });
+  // Scanner-specific elements
   const showScanner=view==='scanner';
-  ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showScanner?'':'none'});
+  ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{
+    const el=document.getElementById(id);if(!el)return;
+    el.className=el.className.replace(/scanner-hidden|scanner-visible/g,'').trim()+' '+(showScanner?'scanner-visible':'scanner-hidden');
+  });
   // Nav active state
   document.querySelectorAll('#navTabs .btn').forEach(b=>b.classList.remove('active'));
   const nav=document.getElementById('nav'+view.charAt(0).toUpperCase()+view.slice(1));
   if(nav)nav.classList.add('active');
-  // Load view data
-  if(view==='scanner'){setTimeout(()=>{renderScatter();renderTFBar();renderCatBar();renderTable()},50)}
+  // Load view data — scatter always re-renders since canvas dimensions are now stable
+  if(view==='scanner'){setTimeout(()=>{if(chart)chart.resize();renderScatter();renderTFBar();renderCatBar();renderTable()},50)}
   if(view==='watchgrid')loadWatchlistGrid();
   if(view==='signals')loadSignals();
   if(view==='cycle')loadCycle();
