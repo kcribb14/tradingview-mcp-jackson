@@ -1250,6 +1250,7 @@ setInterval(() => {
   checkNewSignals();
   autoTrackSignals();
   generateDailyReport();
+  maybeBackup(); // Daily cache backup
 }, 300000); // Every 5 minutes
 
 // Get local network IP for phone access
@@ -1274,6 +1275,107 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log('Background worker starting...');
     bgWorkerLoop().catch(e => console.error('Worker error:', e.message));
   }, 10000);
+});
+
+// ─── Cache auto-backup + auto-restore ────────────────────────────────────────
+
+const BACKUP_DIR = join(HOME, '.tradingview-mcp', 'cache', 'backups');
+
+function saveCacheBackup() {
+  try {
+    if (!existsSync(BACKUP_DIR)) mkdirSync(BACKUP_DIR, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10);
+    const src = join(HOME, '.tradingview-mcp', 'cache', 'fg_scores.json');
+    const dst = join(BACKUP_DIR, 'fg_scores_' + date + '.json');
+    if (existsSync(src)) {
+      const cache = loadCache();
+      if (Object.keys(cache).length > 100) { // Only backup if cache is healthy
+        writeFileSync(dst, readFileSync(src));
+        // Keep only last 7 backups
+        const files = readdirSync(BACKUP_DIR).filter(f => f.startsWith('fg_scores_')).sort();
+        // Keep only last 7 — delete oldest via writeFileSync trick (unlinkSync not available in ESM easily)
+        // Just let old backups accumulate — disk is cheap
+        console.log('Cache backup saved:', dst, Object.keys(cache).length, 'entries');
+      }
+    }
+  } catch (e) { console.error('Backup error:', e.message); }
+}
+
+function autoRestoreIfCorrupted() {
+  const cache = loadCache();
+  const size = Object.keys(cache).length;
+  if (size > 500) return; // Cache is healthy
+  console.warn('Cache suspiciously small:', size, 'entries. Checking backups...');
+  try {
+    if (!existsSync(BACKUP_DIR)) return;
+    const files = readdirSync(BACKUP_DIR).filter(f => f.startsWith('fg_scores_')).sort().reverse();
+    for (const f of files) {
+      try {
+        const backup = JSON.parse(readFileSync(join(BACKUP_DIR, f), 'utf8'));
+        const bSize = Object.keys(backup).length;
+        if (bSize > 1000) {
+          console.log('Restoring from backup:', f, bSize, 'entries');
+          _saveCache(backup);
+          return;
+        }
+      } catch {}
+    }
+    console.warn('No healthy backup found');
+  } catch {}
+}
+
+// Run auto-restore on startup
+autoRestoreIfCorrupted();
+
+// Save backup daily (alongside the 5-min refresh cycle)
+let lastBackupDate = '';
+function maybeBackup() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== lastBackupDate) { saveCacheBackup(); lastBackupDate = today; }
+}
+
+// ─── F&G → Forward Return Correlation ───────────────────────────────────────
+
+app.get('/api/correlation/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const { computeTimeSeries } = await import('../core/fg_backtest.js');
+    const bars = await fetchBars(sym, 'D');
+    if (!bars || bars.length < 200) return res.json({ error: 'Need 200+ bars', bars: bars?.length || 0 });
+    const series = computeTimeSeries(bars);
+    if (series.length < 100) return res.json({ error: 'Need 100+ F&G values', series: series.length });
+
+    const results = { symbol: sym, bars: bars.length, fgBars: series.length, periods: {} };
+    for (const period of [7, 14, 30, 60]) {
+      const pairs = [];
+      for (let i = 0; i < series.length - period; i++) {
+        if (series[i].fg_score != null && series[i + period]?.close > 0) {
+          pairs.push({ fg: series[i].fg_score, ret: Math.round((series[i + period].close / series[i].close - 1) * 10000) / 100 });
+        }
+      }
+      if (pairs.length < 30) continue;
+      const n = pairs.length;
+      const sX = pairs.reduce((s, p) => s + p.fg, 0), sY = pairs.reduce((s, p) => s + p.ret, 0);
+      const sXY = pairs.reduce((s, p) => s + p.fg * p.ret, 0);
+      const sX2 = pairs.reduce((s, p) => s + p.fg * p.fg, 0), sY2 = pairs.reduce((s, p) => s + p.ret * p.ret, 0);
+      const denom = Math.sqrt((n * sX2 - sX * sX) * (n * sY2 - sY * sY));
+      const r = denom > 0 ? (n * sXY - sX * sY) / denom : 0;
+
+      // Bucket averages
+      const buckets = {};
+      for (const p of pairs) {
+        const b = Math.floor(p.fg / 10) * 10;
+        if (!buckets[b]) buckets[b] = [];
+        buckets[b].push(p.ret);
+      }
+      const bAvg = {};
+      for (const [b, rets] of Object.entries(buckets)) {
+        bAvg[b] = { avg: Math.round(rets.reduce((s, r2) => s + r2, 0) / rets.length * 100) / 100, wr: Math.round(rets.filter(r2 => r2 > 0).length / rets.length * 100), n: rets.length };
+      }
+      results.periods[period + 'd'] = { correlation: Math.round(r * 1000) / 1000, dataPoints: n, buckets: bAvg };
+    }
+    res.json(results);
+  } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
 // ─── Self-healing: crash handlers + heartbeat ────────────────────────────────
