@@ -58,6 +58,15 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 .dm-top{flex:2;min-height:0;position:relative}.dm-bot{flex:1;min-height:0;border-top:1px solid #2b2f36;position:relative}
 .dm-top>div,.dm-bot canvas{width:100%!important;height:100%!important}
 .dm-close{background:none;border:none;color:#848e9c;font-size:18px;cursor:pointer}
+.dm-verdict{border-radius:6px;padding:10px 14px;margin-bottom:0}
+.dm-verdict .vd-title{font-size:15px;font-weight:700;margin-bottom:4px}
+.dm-verdict .vd-body{font-size:12px;color:#eaecef;line-height:1.5}
+.dm-verdict .vd-action{font-size:11px;color:#848e9c;margin-top:4px}
+.dm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.dm-card{background:#1e2329;border:1px solid #2b2f36;border-radius:6px;padding:10px;font-size:11px}
+.dm-card .dc-title{font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.dm-card .dc-row{display:flex;justify-content:space-between;padding:2px 0;color:#eaecef}
+.dm-card .dc-row span:last-child{font-weight:600}
 .wg-cell{background:#181a20;border:1px solid #2b2f36;border-radius:6px;overflow:hidden;cursor:pointer;transition:.15s}
 .wg-cell:hover{border-color:#f0b90b33}
 .wg-hdr{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid #2b2f36;background:#1e2329}
@@ -205,9 +214,12 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
         <button class="dm-close" onclick="closeDM()">✕</button>
       </div>
     </div>
-    <div id="dmOnchain" style="display:none;padding:4px 12px;font-size:10px;color:#848e9c;border-bottom:1px solid #2b2f36;display:flex;gap:12px;flex-wrap:wrap"></div>
-    <div class="dm-top" id="dmTop"><div id="tvContainer" style="width:100%;height:100%"></div></div>
-    <div class="dm-bot"><canvas id="dmFGChart"></canvas></div>
+    <div id="dmVerdict" style="padding:10px 16px;border-bottom:1px solid #2b2f36"></div>
+    <div style="display:flex;flex:1;min-height:0;flex-direction:column;overflow-y:auto">
+      <div class="dm-top" id="dmTop"><div id="tvContainer" style="width:100%;height:100%"></div></div>
+      <div class="dm-bot" style="min-height:180px;height:200px"><canvas id="dmFGChart"></canvas></div>
+      <div id="dmCards" style="display:none;padding:10px 16px;gap:10px"></div>
+    </div>
   </div>
 </div>
 
@@ -673,62 +685,104 @@ async function openDM(sym,cat){
   document.getElementById('dmBg').classList.add('open');
   document.getElementById('dmSym').textContent=sym;document.getElementById('dmPrice').textContent='...';
   document.getElementById('dmStar').className='star '+(FAVS.includes(sym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(sym)?'★':'☆';
-  // Check available timeframes
   try{const r=await fetch('/api/available-tfs/'+encodeURIComponent(sym));dmAvailTFs=(await r.json()).available||{}}catch{dmAvailTFs={D:true}}
   renderTFButtons();
   updateTVWidget(sym,'D');
   await loadFGChart(sym,'D');
-  // Load on-chain data for crypto
-  const ocEl=document.getElementById('dmOnchain');
-  ocEl.style.display='none';ocEl.innerHTML='';
-  if(cat?.includes('Crypto')||['BTC','ETH','SOL','XRP','BNB','DOGE','ADA','AVAX','DOT','LINK'].includes(sym)){
-    try{
-      const ocr=await fetch('/api/onchain/'+encodeURIComponent(sym));
-      const oc=await ocr.json();
-      if(!oc.error){
-        ocEl.style.display='flex';
-        const items=[];
-        if(oc.athDistance!=null)items.push('<span>ATH: <b style="color:'+(oc.athDistance<-50?'#f6465d':oc.athDistance<-20?'#ff9800':'#848e9c')+'">'+oc.athDistance+'%</b></span>');
-        if(oc.volMcapRatio!=null)items.push('<span>Vol/MCap: <b>'+oc.volMcapRatio+'%</b></span>');
-        if(oc.sentiment?.up!=null)items.push('<span>Sentiment: <b style="color:'+(oc.sentiment.up>60?'#0ecb81':'#f6465d')+'">'+Math.round(oc.sentiment.up)+'% bull</b></span>');
-        if(oc.watchlistUsers)items.push('<span>Watching: <b>'+(oc.watchlistUsers>1e6?(oc.watchlistUsers/1e6).toFixed(1)+'M':(oc.watchlistUsers/1e3).toFixed(0)+'K')+'</b></span>');
-        if(oc.priceChange?.d30!=null)items.push('<span>30d: <b style="color:'+(oc.priceChange.d30>0?'#0ecb81':'#f6465d')+'">'+(oc.priceChange.d30>0?'+':'')+oc.priceChange.d30.toFixed(1)+'%</b></span>');
-        if(oc.maxSupply&&oc.circulatingSupply)items.push('<span>Supply: <b>'+Math.round(oc.circulatingSupply/oc.maxSupply*100)+'%</b> minted</span>');
-        ocEl.innerHTML=items.join('');
-      }
-    }catch{}
+
+  // ─── VERDICT SECTION ───
+  const row=D.symbols?.find(r=>r.s===sym)||(await fetch('/api/fetch-and-cache/'+encodeURIComponent(sym)+'?tf=D').then(r=>r.json()).catch(()=>null));
+  const vEl=document.getElementById('dmVerdict');
+  const fg=row?.f??row?.fg??null;
+  const score=row?.sq||0;const grade=row?.sg||'D';const signal=row?.w||'';
+  const threshold=row?.f!=null&&signal==='ENTRY ZONE'?'triggered':null;
+
+  // Determine verdict
+  let verdictHtml='';
+  if(signal==='ENTRY ZONE'){
+    const gCol=grade==='A'?'#0ecb81':grade==='B'?'#f0b90b':'#848e9c';
+    verdictHtml='<div class="dm-verdict" style="background:'+gCol+'12;border:1px solid '+gCol+'44">';
+    verdictHtml+='<div class="vd-title" style="color:'+gCol+'">🎯 BUY SIGNAL — GRADE '+grade+' ('+score+'/100)</div>';
+    verdictHtml+='<div class="vd-body">F&G is '+(fg>0?'+':'')+fg+', below rare fear for '+(cat||'this class')+'. ';
+    if(row?.wh==='ACC')verdictHtml+='Smart money is accumulating. ';
+    if(row?.gs>50)verdictHtml+='GeoScore '+row.gs+' ('+row.gp+') — strong geological backing. ';
+    verdictHtml+='</div>';
+    verdictHtml+='<div class="vd-action">Position: 5% max | Hold: 30d or until F&G greed | Expected: +5.85% avg</div>';
+    verdictHtml+='</div>';
+  }else if(signal==='WATCHING'){
+    verdictHtml='<div class="dm-verdict" style="background:#f0b90b12;border:1px solid #f0b90b44">';
+    verdictHtml+='<div class="vd-title" style="color:#f0b90b">⏳ WATCH — APPROACHING FEAR</div>';
+    verdictHtml+='<div class="vd-body">F&G is '+(fg>0?'+':'')+fg+'. Heading toward entry zone for '+(cat||'this class')+'. Monitor closely.</div>';
+    verdictHtml+='</div>';
+  }else if(signal==='TAKE PROFIT'||signal==='EXIT ZONE'){
+    verdictHtml='<div class="dm-verdict" style="background:#f6465d12;border:1px solid #f6465d44">';
+    verdictHtml+='<div class="vd-title" style="color:#f6465d">🔴 EXIT — TAKE PROFIT</div>';
+    verdictHtml+='<div class="vd-body">F&G is '+(fg>0?'+':'')+fg+', above greed threshold. Consider taking profits.</div>';
+    verdictHtml+='</div>';
+  }else{
+    verdictHtml='<div class="dm-verdict" style="background:#1e2329;border:1px solid #2b2f36">';
+    verdictHtml+='<div class="vd-title" style="color:#848e9c">📊 NEUTRAL — No Signal</div>';
+    verdictHtml+='<div class="vd-body">F&G is '+(fg!=null?(fg>0?'+':'')+fg:'loading')+'. Not in a buy or sell zone for '+(cat||'this class')+'.</div>';
+    verdictHtml+='</div>';
   }
-  // For DEX tokens or any symbol, show smart money data from the row
-  const row=D.symbols?.find(r=>r.s===sym);
-  if(row){
-    const smartItems=[];
-    if(row.wh==='ACC')smartItems.push('<span style="color:#0ecb81;font-weight:600">🧠 Smart Money Accumulation</span>');
-    if(row.wh==='DIST')smartItems.push('<span style="color:#f6465d;font-weight:600">🔴 Distribution</span>');
-    if(row.ats>0)smartItems.push('<span>Avg Trade: <b>$'+row.ats.toLocaleString()+'</b>'+(row.ats>10000?' (whale)':row.ats>1000?' (mid)':' (retail)')+'</span>');
-    if(row.br)smartItems.push('<span>Buy Ratio: <b style="color:'+(row.br>55?'#0ecb81':row.br<45?'#f6465d':'#848e9c')+'">'+row.br+'%</b></span>');
-    if(row.sq)smartItems.push('<span>Signal: <b style="color:'+(row.sg==='A'?'#0ecb81':row.sg==='B'?'#f0b90b':'#848e9c')+'">'+(row.sq||0)+'/100 Grade '+(row.sg||'?')+'</b></span>');
-    if(smartItems.length>0){
-      ocEl.style.display='flex';
-      ocEl.innerHTML=(ocEl.innerHTML?ocEl.innerHTML+' | ':'')+smartItems.join(' ');
+  vEl.innerHTML=verdictHtml;
+
+  // ─── THREE INFO CARDS ───
+  const cardsEl=document.getElementById('dmCards');
+  let cards='';
+
+  // Card A: Sentiment
+  cards+='<div class="dm-card"><div class="dc-title">📊 Sentiment</div>';
+  cards+='<div class="dc-row"><span>F&G Score</span><span>'+(fg!=null?(fg>0?'+':'')+fg:'—')+'</span></div>';
+  cards+='<div class="dc-row"><span>Zone</span><span>'+zone(fg)+'</span></div>';
+  if(row?.r!=null)cards+='<div class="dc-row"><span>RSI</span><span>'+row.r+'</span></div>';
+  if(row?.ch!=null)cards+='<div class="dc-row"><span>EMA Deviation</span><span>'+(row.ch>0?'+':'')+row.ch+'%</span></div>';
+  if(row?.wh)cards+='<div class="dc-row"><span>Smart Money</span><span style="color:'+(row.wh==='ACC'?'#0ecb81':'#f6465d')+'">'+(row.wh==='ACC'?'🟢 Accumulating':'🔴 Distributing')+'</span></div>';
+  if(row?.ats>0)cards+='<div class="dc-row"><span>Avg Trade</span><span>$'+row.ats.toLocaleString()+'</span></div>';
+  if(row?.br)cards+='<div class="dc-row"><span>Buy Ratio</span><span>'+row.br+'%</span></div>';
+  cards+='</div>';
+
+  // Card B: Geology (ASX mining only)
+  if(row?.gs>0||sym.endsWith('.AX')){
+    let geo=null;
+    try{const gr=await fetch('/api/geology/'+encodeURIComponent(sym));geo=await gr.json();if(geo.error)geo=null}catch{}
+    if(geo&&geo.total_holes>0){
+      cards+='<div class="dm-card"><div class="dc-title">🔬 Geology</div>';
+      cards+='<div class="dc-row"><span>GeoScore</span><span style="color:#f0b90b;font-weight:700">'+geo.geological_score+' ('+geo.geological_percentile+')</span></div>';
+      cards+='<div class="dc-row"><span>Drillholes</span><span>'+geo.total_holes.toLocaleString()+'</span></div>';
+      cards+='<div class="dc-row"><span>Commodity</span><span>'+geo.primary_commodity+'</span></div>';
+      cards+='<div class="dc-row"><span>Avg Depth</span><span>'+geo.avg_depth_m+'m</span></div>';
+      if(geo.stranded_assets?.estimated_newly_economic>0){
+        cards+='<div class="dc-row"><span>Stranded Assets</span><span style="color:#0ecb81">'+geo.stranded_assets.estimated_newly_economic.toLocaleString()+' intercepts</span></div>';
+        cards+='<div class="dc-row"><span>Price Uplift</span><span>+'+geo.stranded_assets.value_uplift_pct+'%</span></div>';
+      }
+      if(geo.projects?.length>0)cards+='<div class="dc-row"><span>Projects</span><span style="color:#5e6673">'+geo.projects.slice(0,3).join(', ')+'</span></div>';
+      cards+='</div>';
     }
   }
-  // Geological data for mining stocks
-  if(row?.gs>0||sym.endsWith('.AX')){
-    try{
-      const gr=await fetch('/api/geology/'+encodeURIComponent(sym));
-      const geo=await gr.json();
-      if(!geo.error&&geo.total_holes>0){
-        ocEl.style.display='flex';
-        const geoItems=[];
-        geoItems.push('<span>🔬 <b>'+geo.total_holes.toLocaleString()+'</b> drillholes</span>');
-        geoItems.push('<span>'+geo.primary_commodity+'</span>');
-        if(geo.geological_percentile)geoItems.push('<span style="color:#f0b90b;font-weight:600">'+geo.geological_percentile+'</span>');
-        if(geo.stranded_assets?.estimated_newly_economic>0)geoItems.push('<span style="color:#0ecb81">'+geo.stranded_assets.estimated_newly_economic.toLocaleString()+' newly economic</span>');
-        if(geo.stranded_assets?.value_uplift_pct>0)geoItems.push('<span>Price uplift: +'+geo.stranded_assets.value_uplift_pct+'%</span>');
-        if(geo.projects?.length>0)geoItems.push('<span style="color:#5e6673">'+geo.projects.slice(0,3).join(', ')+'</span>');
-        ocEl.innerHTML=(ocEl.innerHTML?ocEl.innerHTML+' | ':'')+geoItems.join(' ');
-      }
-    }catch{}
+
+  // Card C: Cycle Position
+  try{
+    const cr=await fetch('/api/cycle');const cycle=await cr.json();
+    cards+='<div class="dm-card"><div class="dc-title">🔄 Cycle</div>';
+    cards+='<div class="dc-row"><span>Market</span><span style="color:'+(cycle.macroStage?.name?.includes('SLOWDOWN')||cycle.macroStage?.name?.includes('CONTRACTION')?'#f6465d':'#0ecb81')+'">Stage '+Math.round(cycle.macroStage?.stage||0)+': '+(cycle.macroStage?.name||'?')+'</span></div>';
+    cards+='<div class="dc-row"><span>Action</span><span style="font-size:10px">'+(cycle.macroStage?.action?.slice(0,40)||'?')+'</span></div>';
+    const breadth=cycle.breadth||{};
+    const bKey=cat?.includes('ASX')?'ASX':cat?.includes('Crypto')?'Crypto':'US';
+    if(breadth[bKey]!=null)cards+='<div class="dc-row"><span>Breadth ('+bKey+')</span><span>'+breadth[bKey]+'% above EMA</span></div>';
+    cards+='<div class="dc-row"><span>Alt Season</span><span>'+(cycle.altSeason?.label||'?')+' ('+cycle.altSeason?.pct+'%)</span></div>';
+    cards+='</div>';
+  }catch{}
+
+  cardsEl.style.display='grid';
+  cardsEl.className='dm-cards';
+  cardsEl.innerHTML=cards;
+
+  // Update price in header
+  if(row?.p){
+    const pr=row.p>=1?'$'+row.p.toFixed(2):row.p>0.001?'$'+row.p.toFixed(4):'$'+row.p?.toExponential(2);
+    document.getElementById('dmPrice').textContent=pr;
+    if(fg!=null){const fc=fgCls(fg);document.getElementById('dmFG').className='fg '+fc;document.getElementById('dmFG').textContent=(fg>0?'+':'')+fg.toFixed?.(1)||fg}
   }
 }
 function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML='';if(dmFGChart){dmFGChart.destroy();dmFGChart=null}}
