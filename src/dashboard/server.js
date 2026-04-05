@@ -88,9 +88,11 @@ function rebuildData() {
 
       // Clamp all F&G scores to safe range
       const clamp = v => v != null ? Math.max(-80, Math.min(100, Math.round(v * 10) / 10)) : null;
+      // 24h change approximation from pmacd component (price vs EMA deviation)
+      const ch = entry.components?.pmacd != null ? Math.round(entry.components.pmacd * 100) / 100 : null;
       rows.push({
         s: sym, f: clamp(fg), z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
-        r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null,
+        r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null, ch,
         f1: clamp(cache[sym + ':15']?.fgScore),
         fh: clamp(cache[sym + ':60']?.fgScore),
         f4: clamp(cache[sym + ':240']?.fgScore),
@@ -116,11 +118,12 @@ function rebuildData() {
       const fg = Math.max(-80, Math.min(100, Math.round((token.fg ?? 0) * 10) / 10));
       const chain = (token.chain || '').toLowerCase();
       const chainLabel = chain.charAt(0).toUpperCase() + chain.slice(1);
-      const cat = chainCounts[chain] >= 10 ? 'DEX ' + chainLabel : 'DEX Other';
+      const cat = chainCounts[chain] >= 20 ? 'DEX ' + chainLabel : 'DEX Other';
+      const dexCh = token.priceChange?.h24 != null ? Math.round(token.priceChange.h24 * 100) / 100 : null;
       rows.push({
         s: token.symbol, f: fg, z: token.zone || 'Balanced',
         c: cat, t: 3, w: '', p: token.price || 0, m: token.mcap || 1e6,
-        r: null, f1: null, fh: null, f4: null, fw: null, spark: [],
+        r: null, ch: dexCh, f1: null, fh: null, f4: null, fw: null, spark: [],
       });
     }
 
@@ -269,7 +272,8 @@ app.get('/api/history/:symbol', async (req, res) => {
         let pair = sym.replace(/[-\/]/g, '').toUpperCase();
         if (!pair.endsWith('USDT') && !pair.endsWith('USD')) pair += 'USDT';
         const bi = binanceIntervals[tf] || '1d';
-        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=200`, { signal: AbortSignal.timeout(5000) });
+        const limit = (tf === 'D' || tf === 'W') ? 500 : 200;
+        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=${limit}`, { signal: AbortSignal.timeout(5000) });
         if (r.ok) {
           const d = await r.json();
           if (Array.isArray(d) && d.length >= 20) {
@@ -319,18 +323,17 @@ app.get('/api/history/:symbol', async (req, res) => {
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
-// Available timeframes for a symbol (check which TFs have cached data)
+// Available timeframes for a symbol
+// All TFs are available via live fetch; cached flag indicates pre-computed data exists
 app.get('/api/available-tfs/:symbol', (req, res) => {
   const sym = req.params.symbol;
   const tfs = ['15', '60', '240', 'D', 'W'];
   const cache = loadCache();
   const available = {};
   for (const tf of tfs) {
-    const key = `${sym}:${tf}`;
-    available[tf] = cache[key]?.fgScore != null;
+    // All TFs available via live Binance/Yahoo fetch in /api/history
+    available[tf] = true;
   }
-  // Daily is always "available" via live fetch
-  available['D'] = true;
   res.json({ symbol: sym, available });
 });
 

@@ -246,7 +246,7 @@ function renderTable(){
   const fk=tfKey[cTF]||'f';
   const cols=[
     {k:'',l:'★',w:'30px'},{k:'',l:'#',w:'35px'},{k:'s',l:'Name',S:1},{k:'p',l:'Price',S:1},
-    {k:'m',l:'Market Cap',S:1,h:1},{k:'f',l:'F&G Daily',S:1},{k:'f1',l:'15m',S:1,h:1},
+    {k:'ch',l:'Chg%',S:1},{k:'m',l:'Market Cap',S:1,h:1},{k:'f',l:'F&G Daily',S:1},{k:'f1',l:'15m',S:1,h:1},
     {k:'fh',l:'1H',S:1,h:1},{k:'f4',l:'4H',S:1,h:1},{k:'fw',l:'Wk',S:1,h:1},
     {k:'z',l:'Zone'},{k:'',l:'Trend'},{k:'w',l:'Signal'}
   ];
@@ -267,6 +267,7 @@ function renderTable(){
       '<td style="color:#848e9c">'+(pageStart+i+1)+'</td>'+
       '<td class="sym">'+r.s+'<span style="color:#5e6673;font-weight:400;margin-left:4px;font-size:10px">'+r.c+'</span></td>'+
       '<td>'+pr+'</td>'+
+      '<td style="font-size:11px;color:'+(r.ch>0?'#0ecb81':r.ch<0?'#f6465d':'#848e9c')+'">'+(r.ch!=null?(r.ch>0?'+':'')+r.ch.toFixed(1)+'%':'—')+'</td>'+
       '<td class="hm" style="color:#848e9c">'+fmt$(r.m)+'</td>'+
       '<td>'+fgBadge(r.f)+'</td>'+
       '<td class="hm">'+fgBadge(r.f1)+'</td><td class="hm">'+fgBadge(r.fh)+'</td>'+
