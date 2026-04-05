@@ -92,6 +92,15 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 .sig-topbar .tb-pill .tb-val{font-size:16px;font-weight:700;display:block}
 .sig-table{width:100%;border-collapse:collapse;font-size:12px}.sig-table th{text-align:left;color:#848e9c;padding:4px 8px;border-bottom:1px solid #2b2f36}
 .sig-table td{padding:4px 8px;border-bottom:1px solid #1e2329}
+/* Expandable row detail */
+.expand-detail{padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:11px;color:#eaecef}
+.expand-detail .ed-section{background:#1e2329;border:1px solid #2b2f36;border-radius:6px;padding:10px}
+.expand-detail .ed-title{font-size:10px;color:#f0b90b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;font-weight:600}
+.expand-detail .ed-row{display:flex;justify-content:space-between;padding:2px 0}
+.expand-detail .ed-intercept{display:flex;align-items:center;gap:6px;padding:3px 0}
+.expand-detail .ed-bar{height:10px;border-radius:4px;min-width:4px}
+.expand-detail .ed-actions{grid-column:span 2;display:flex;gap:6px;justify-content:center;padding-top:4px}
+@media(max-width:768px){.expand-detail{grid-template-columns:1fr}.expand-detail .ed-actions{grid-column:span 1}}
 /* Tab hiding: use visibility+height instead of display:none so Chart.js canvases keep dimensions */
 .tab-hidden{visibility:hidden;height:0;overflow:hidden;position:absolute;width:100%;pointer-events:none}
 .tab-visible{visibility:visible;height:auto;overflow:visible;position:relative;pointer-events:auto}
@@ -405,11 +414,16 @@ function renderTable(){
   }).join('');
 
   const pageStart=(curPage-1)*pageSize;
+  const isMining=cCat?.includes('Mining');
+  const totalCols=isMining?14:15; // column count for detail row colspan
   document.getElementById('tbody').innerHTML=rows.map((r,i)=>{
     const isFav=FAVS.includes(r.s);
     const pr=r.p>=1?'$'+r.p.toFixed(2):r.p>0.001?'$'+r.p.toFixed(4):r.p>0?'$'+r.p.toExponential(2):'—';
     const sw=r.w==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.w==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.w==='EXIT ZONE'||r.w==='TAKE PROFIT'?'<span class="sw sw-x">EXIT</span>':'';
-    return'<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">'+
+    const hasMiningData=r.gs>0;
+    const geoCol=r.gp==='P99'?'#f0b90b':r.gp==='P95'?'#0ecb81':'#848e9c';
+    const borderStyle=hasMiningData?'border-left:3px solid '+geoCol:'';
+    return'<tr style="cursor:pointer;'+borderStyle+'" onclick="toggleRowExpand(\''+r.s+'\',\''+r.c+'\',this)">'+
       '<td onclick="event.stopPropagation()"><span class="star '+(isFav?'on':'')+'" onclick="toggleFav(\''+r.s+'\',event)">'+(isFav?'★':'☆')+'</span></td>'+
       '<td style="color:#848e9c">'+(pageStart+i+1)+'</td>'+
       '<td class="sym">'+r.s+'<span style="color:#5e6673;font-weight:400;margin-left:4px;font-size:10px">'+r.c+'</span></td>'+
@@ -423,7 +437,9 @@ function renderTable(){
       '<td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td>'+
       '<td><canvas class="sparkline" width="60" height="20" data-spark="'+(r.spark||[]).join(',')+'"></canvas></td>'+
       '<td>'+sw+'</td>'+
-      '<td style="font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">🐋 ACC</span>':r.wh==='DIST'?'<span style="color:#f6465d">🔴 DIST</span>':'—')+'</td></tr>';
+      '<td style="font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">🐋 ACC</span>':r.wh==='DIST'?'<span style="color:#f6465d">🔴 DIST</span>':'—')+'</td></tr>'+
+      // Expandable detail row (hidden by default)
+      '<tr class="expand-row" id="expand-'+r.s.replace(/[^a-zA-Z0-9]/g,'_')+'" style="display:none"><td colspan="16" style="padding:0;background:#12151a"></td></tr>';
   }).join('');
 
   // Draw sparklines
@@ -671,6 +687,118 @@ function fmtTime(ts,tf){
   const d=new Date(ts);
   if(tf==='W'||tf==='D')return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+
+// ─── Expandable Row Detail ──────────────────────────────────────────────────
+let expandedRow=null;
+async function toggleRowExpand(sym,cat,tr){
+  const id='expand-'+sym.replace(/[^a-zA-Z0-9]/g,'_');
+  const expandTr=document.getElementById(id);
+  if(!expandTr)return openDM(sym,cat); // fallback to modal if no expand row
+
+  // Collapse previous
+  if(expandedRow&&expandedRow!==id){
+    const prev=document.getElementById(expandedRow);
+    if(prev)prev.style.display='none';
+  }
+
+  // Toggle current
+  if(expandTr.style.display==='none'){
+    expandTr.style.display='';
+    expandedRow=id;
+    const cell=expandTr.querySelector('td');
+    cell.innerHTML='<div style="padding:8px;color:#848e9c;text-align:center">Loading...</div>';
+
+    // Fetch geological data
+    const row=D.symbols?.find(r=>r.s===sym);
+    let geo=null;
+    try{const gr=await fetch('/api/geology/'+encodeURIComponent(sym));geo=await gr.json();if(geo.error)geo=null}catch{}
+
+    let html='<div class="expand-detail">';
+
+    if(geo&&geo.total_holes>0){
+      // LEFT: Drill Results + Reactions
+      html+='<div class="ed-section"><div class="ed-title">Drill Results & Market Reaction</div>';
+      if(geo.reports?.length>0){
+        const maxGxw=Math.max(...geo.reports.map(r=>r.gxw||0),1);
+        for(const rep of geo.reports.slice(0,4)){
+          const rx=rep.reaction||{};
+          const statusCol={'CONTRARIAN_BUY':'#0ecb81','UNREACTED':'#ff9800','PARTIAL':'#848e9c','FULLY_PRICED':'#5e6673'}[rx.status]||'#5e6673';
+          const statusLabel={'CONTRARIAN_BUY':'🎯 Contrarian Buy','UNREACTED':'⚠️ Unreacted','PARTIAL':'↗ Partial','FULLY_PRICED':'✅ Priced In'}[rx.status]||'—';
+          html+='<div style="margin-bottom:8px;border-left:3px solid '+statusCol+';padding-left:8px">';
+          html+='<div style="font-weight:600;font-size:11px">'+rep.title+'</div>';
+          html+='<div style="font-size:10px;color:#848e9c">'+rep.date+' | '+rep.quality+(rep.extension?' | 🟢 Extension':'')+'</div>';
+          // Intercept bar
+          const barW=Math.min(100,Math.round((rep.gxw||0)/maxGxw*100));
+          html+='<div class="ed-intercept"><div class="ed-bar" style="width:'+barW+'%;background:'+(rep.extension?'#0ecb81':'#5e6673')+'"></div><span style="font-size:10px">'+rep.best+' (GxW:'+rep.gxw+')</span></div>';
+          // Reaction
+          if(rx.d30!=null){
+            html+='<div style="font-size:10px"><span style="color:'+statusCol+'">'+statusLabel+'</span> 30d: <b style="color:'+(rx.d30>0?'#0ecb81':'#f6465d')+'">'+(rx.d30>0?'+':'')+rx.d30+'%</b> (exp: +'+rx.expected+'%)</div>';
+          }
+          html+='</div>';
+        }
+      }else{html+='<div style="color:#5e6673">No recent drill reports</div>'}
+      html+='</div>';
+
+      // RIGHT: Stranded Assets + Scope
+      html+='<div class="ed-section"><div class="ed-title">Stranded Assets & Geological Scope</div>';
+      html+='<div class="ed-row"><span>Total Drillholes</span><span style="font-weight:600">'+geo.total_holes.toLocaleString()+'</span></div>';
+      html+='<div class="ed-row"><span>GeoScore</span><span style="color:#f0b90b;font-weight:700">'+geo.geological_score+' ('+geo.geological_percentile+')</span></div>';
+      html+='<div class="ed-row"><span>Commodity</span><span>'+geo.primary_commodity+'</span></div>';
+      html+='<div class="ed-row"><span>Avg Depth</span><span>'+geo.avg_depth_m+'m (max: '+geo.max_depth_m+'m)</span></div>';
+      if(geo.stranded_assets){
+        const sa=geo.stranded_assets;
+        html+='<div style="margin-top:6px;padding:6px;background:#0ecb8110;border-radius:4px">';
+        html+='<div class="ed-row"><span>Newly Economic</span><span style="color:#0ecb81;font-weight:700">'+sa.estimated_newly_economic.toLocaleString()+' intercepts</span></div>';
+        html+='<div class="ed-row"><span>Drilled at</span><span>$'+sa.historical_price+'/oz</span></div>';
+        html+='<div class="ed-row"><span>Current price</span><span>$'+sa.current_price+'/oz</span></div>';
+        html+='<div class="ed-row"><span>Uplift</span><span style="color:#0ecb81">+'+sa.value_uplift_pct+'%</span></div>';
+        html+='</div>';
+      }
+      if(geo.projects?.length>0){
+        html+='<div style="margin-top:6px;font-size:10px;color:#5e6673">Projects: '+geo.projects.slice(0,5).join(', ')+'</div>';
+      }
+      html+='</div>';
+    }else if(cat?.includes('Crypto')){
+      // Crypto detail
+      html+='<div class="ed-section"><div class="ed-title">On-Chain & Smart Money</div>';
+      if(row?.wh==='ACC')html+='<div class="ed-row"><span>Smart Money</span><span style="color:#0ecb81;font-weight:600">🟢 Accumulating</span></div>';
+      if(row?.ats>0)html+='<div class="ed-row"><span>Avg Trade Size</span><span>$'+row.ats.toLocaleString()+(row.ats>10000?' (whale)':row.ats>1000?' (mid)':' (retail)')+'</span></div>';
+      if(row?.br)html+='<div class="ed-row"><span>Buy Ratio</span><span style="color:'+(row.br>55?'#0ecb81':row.br<45?'#f6465d':'#848e9c')+'">'+row.br+'%</span></div>';
+      html+='<div class="ed-row"><span>F&G Score</span><span>'+fgBadge(row?.f)+'</span></div>';
+      html+='<div class="ed-row"><span>RSI</span><span>'+(row?.r||'—')+'</span></div>';
+      html+='</div>';
+      html+='<div class="ed-section"><div class="ed-title">Cycle Position</div>';
+      html+='<div class="ed-row"><span>Category</span><span>'+cat+'</span></div>';
+      html+='<div class="ed-row"><span>Signal</span><span>'+(row?.w||'None')+'</span></div>';
+      html+='<div class="ed-row"><span>Smart Score</span><span>'+(row?.ss||0)+'/100</span></div>';
+      html+='</div>';
+    }else{
+      // Generic stock detail
+      html+='<div class="ed-section"><div class="ed-title">Sentiment & Volume</div>';
+      html+='<div class="ed-row"><span>F&G Score</span><span>'+fgBadge(row?.f)+'</span></div>';
+      html+='<div class="ed-row"><span>RSI</span><span>'+(row?.r||'—')+'</span></div>';
+      if(row?.wh)html+='<div class="ed-row"><span>Volume Signal</span><span style="color:'+(row.wh==='ACC'?'#0ecb81':'#f6465d')+'">'+(row.wh==='ACC'?'🐋 Accumulation':'🔴 Distribution')+'</span></div>';
+      html+='<div class="ed-row"><span>EMA Deviation</span><span>'+(row?.ch!=null?(row.ch>0?'+':'')+row.ch+'%':'—')+'</span></div>';
+      html+='</div>';
+      html+='<div class="ed-section"><div class="ed-title">Signal Details</div>';
+      html+='<div class="ed-row"><span>Signal</span><span>'+(row?.w||'None')+'</span></div>';
+      html+='<div class="ed-row"><span>Smart Score</span><span>'+(row?.ss||0)+'/100</span></div>';
+      html+='<div class="ed-row"><span>Category</span><span>'+cat+'</span></div>';
+      html+='</div>';
+    }
+
+    // Action buttons
+    html+='<div class="ed-actions">';
+    html+='<button class="btn" onclick="event.stopPropagation();openDM(\''+sym+'\',\''+cat+'\')">Open Full Chart</button>';
+    html+='<button class="btn" onclick="event.stopPropagation();toggleFav(\''+sym+'\')">★ Watchlist</button>';
+    html+='</div></div>';
+
+    cell.innerHTML=html;
+  }else{
+    expandTr.style.display='none';
+    expandedRow=null;
+  }
 }
 
 let dmCompSym='';
