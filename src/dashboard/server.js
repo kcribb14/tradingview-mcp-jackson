@@ -518,6 +518,41 @@ app.get('/api/worker-status', (req, res) => {
   res.json(workerStatus);
 });
 
+// Sector analysis
+app.get('/api/sector/:category', (req, res) => {
+  const cat = req.params.category;
+  const rows = DATA.rows.filter(r => r.c === cat || r.c.includes(cat));
+  if (rows.length === 0) return res.json({ error: 'No symbols in category' });
+
+  const scores = rows.map(r => r.f).filter(v => v != null);
+  const avg = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 10) / 10 : 0;
+  const inFear = scores.filter(v => v < -10).length;
+  const inGreed = scores.filter(v => v > 10).length;
+
+  // Relative strength: each symbol vs sector avg
+  const ranked = rows.map(r => ({
+    s: r.s, f: r.f, p: r.p, ch: r.ch, r: r.r, wh: r.wh, sq: r.sq, sg: r.sg, m: r.m,
+    rs: r.f != null ? Math.round((r.f - avg) * 10) / 10 : null, // relative strength
+  })).sort((a, b) => (a.rs ?? 0) - (b.rs ?? 0)); // most oversold relative to sector first
+
+  // Sector dispersion (how spread out are scores)
+  const min = Math.min(...scores), max = Math.max(...scores);
+  const std = scores.length > 1 ? Math.sqrt(scores.reduce((s, v) => s + (v - avg) ** 2, 0) / (scores.length - 1)) : 0;
+  const correlation = std < 5 ? 'HIGH (moving together)' : std < 15 ? 'MODERATE' : 'LOW (rotation underway)';
+
+  res.json({
+    category: cat,
+    count: rows.length,
+    avgFG: avg,
+    fearPct: scores.length > 0 ? Math.round(inFear / scores.length * 100) : 0,
+    greedPct: scores.length > 0 ? Math.round(inGreed / scores.length * 100) : 0,
+    range: [Math.round(min * 10) / 10, Math.round(max * 10) / 10],
+    stddev: Math.round(std * 10) / 10,
+    correlation,
+    symbols: ranked,
+  });
+});
+
 // Trending: biggest movers + whale activity + new high-volume DEX tokens
 app.get('/api/trending', (req, res) => {
   const rows = DATA.rows;
@@ -604,11 +639,13 @@ app.get('/api/cycle', (req, res) => {
   // Mining rotation
   const mining = [
     { name: 'Gold Price', syms: ['GC=F'], fg: r('GC=F')?.f },
-    { name: 'Gold Majors', syms: ['NST.AX', 'EVN.AX'], fg: avgFG(['NST.AX', 'EVN.AX']) },
-    { name: 'Gold Mid', syms: ['RMS.AX', 'CMM.AX'], fg: avgFG(['RMS.AX', 'CMM.AX']) },
-    { name: 'Gold Micro', syms: ['DEV.AX', 'LOT.AX', 'WR1.AX'], fg: avgFG(['DEV.AX', 'LOT.AX', 'WR1.AX']) },
-    { name: 'Silver', syms: ['SI=F'], fg: r('SI=F')?.f },
-    { name: 'Lithium', syms: ['PLS.AX', 'LTR.AX', 'IGO.AX'], fg: avgFG(['PLS.AX', 'LTR.AX', 'IGO.AX']) },
+    { name: 'Gold Major', syms: ['NEM','GOLD','AEM','ABX.TO','NST.AX','EVN.AX','GLEN.L','ANG.JO'], fg: avgFG(['NEM','GOLD','AEM','ABX.TO','NST.AX','EVN.AX','GLEN.L','ANG.JO']) },
+    { name: 'Gold Mid', syms: ['AGI','BTG','SA','GOR.AX','RMS.AX','FR.TO'], fg: avgFG(['AGI','BTG','SA','GOR.AX','RMS.AX','FR.TO']) },
+    { name: 'Gold Micro', syms: ['DEV.AX','LOT.AX','WR1.AX','CHR.AX'], fg: avgFG(['DEV.AX','LOT.AX','WR1.AX','CHR.AX']) },
+    { name: 'Silver', syms: ['AG','HL','PAAS','SI=F'], fg: avgFG(['AG','HL','PAAS','SI=F']) },
+    { name: 'Copper', syms: ['FCX','SCCO','HG=F','SFR.AX'], fg: avgFG(['FCX','SCCO','HG=F','SFR.AX']) },
+    { name: 'Lithium', syms: ['ALB','SQM','PLS.AX','LTR.AX','IGO.AX'], fg: avgFG(['ALB','SQM','PLS.AX','LTR.AX','IGO.AX']) },
+    { name: 'Uranium', syms: ['CCJ','UEC','PDN.AX','BOE.AX'], fg: avgFG(['CCJ','UEC','PDN.AX','BOE.AX']) },
   ];
 
   res.json({ stages, phase, leadLag, altSeason: { pct: altSeasonPct, label: altSeason, btcFG, altsAbove: altsBeatBTC, altsTotal: altScores.length }, mining, breadth: DATA.stats.breadth });
