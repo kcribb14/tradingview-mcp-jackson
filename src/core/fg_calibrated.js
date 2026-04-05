@@ -96,8 +96,15 @@ export function detectAssetClass(symbol) {
     return 'ASX_MINING_MICRO'; // Default ASX to micro (conservative)
   }
 
-  // International stocks
-  if (s.match(/\.(L|TO|HK|T|DE|SI|JO|SA|KS)$/)) return 'US_LARGE_CAP'; // Use large-cap profile for intl
+  // International stocks — proper classification
+  if (s.endsWith('.TO') || s.endsWith('.V')) return 'INTL_CANADA';
+  if (s.endsWith('.L')) return 'INTL_LONDON';
+  if (s.endsWith('.HK')) return 'INTL_HONG_KONG';
+  if (s.endsWith('.T')) return 'INTL_JAPAN';
+  if (s.endsWith('.DE')) return 'INTL_GERMANY';
+  if (s.endsWith('.NS') || s.endsWith('.BO')) return 'INTL_INDIA';
+  if (s.endsWith('.JO')) return 'INTL_SOUTH_AFRICA';
+  if (s.match(/\.(SI|SA|KS)$/)) return 'US_LARGE_CAP'; // remaining intl → large cap profile
 
   // Crypto
   const base = s.replace(/-USD[T]?$/i, '').replace(/USDT$/i, '');

@@ -69,7 +69,7 @@ function rebuildData() {
       if (!key.endsWith(':D') || entry?.fgScore == null) continue;
       const sym = key.replace(':D', '');
       const cls = detectAssetClass(sym);
-      const cat = { US_LARGE_CAP:'US Large Cap', US_MID_SMALL:'US Mid/Small', ASX_TOP50:'ASX Top 50', ASX_MINING_MID:'ASX Mining Mid', ASX_MINING_MICRO:'ASX Mining Micro', CRYPTO_MAJOR:'Crypto Major', CRYPTO_MID:'Crypto Mid', COMMODITIES:'Commodities', ETFS:'ETFs' }[cls] || cls;
+      const cat = { US_LARGE_CAP:'US Large Cap', US_MID_SMALL:'US Mid/Small', ASX_TOP50:'ASX Top 50', ASX_MINING_MID:'ASX Mining Mid', ASX_MINING_MICRO:'ASX Mining Micro', CRYPTO_MAJOR:'Crypto Major', CRYPTO_MID:'Crypto Mid', COMMODITIES:'Commodities', ETFS:'ETFs', INTL_CANADA:'Canada TSX', INTL_LONDON:'London LSE', INTL_HONG_KONG:'Hong Kong', INTL_JAPAN:'Japan', INTL_GERMANY:'Germany', INTL_INDIA:'India', INTL_SOUTH_AFRICA:'South Africa' }[cls] || cls;
 
       const fg = entry.fgScore;
       const price = entry.lastClose || 0;
@@ -516,6 +516,28 @@ app.get('/api/discover', async (req, res) => {
 // Worker status endpoint
 app.get('/api/worker-status', (req, res) => {
   res.json(workerStatus);
+});
+
+// Trending: biggest movers + whale activity + new high-volume DEX tokens
+app.get('/api/trending', (req, res) => {
+  const rows = DATA.rows;
+  // Biggest gainers (most positive pmacd)
+  const gainers = [...rows].filter(r => r.ch != null).sort((a, b) => (b.ch || 0) - (a.ch || 0)).slice(0, 15)
+    .map(r => ({ s: r.s, c: r.c, p: r.p, ch: r.ch, f: r.f, z: r.z }));
+  // Biggest losers (potential bounces)
+  const losers = [...rows].filter(r => r.ch != null).sort((a, b) => (a.ch || 0) - (b.ch || 0)).slice(0, 15)
+    .map(r => ({ s: r.s, c: r.c, p: r.p, ch: r.ch, f: r.f, z: r.z, sq: r.sq, sg: r.sg }));
+  // Whale accumulation (high volume during fear)
+  const whales = rows.filter(r => r.wh === 'ACC').sort((a, b) => (b.sq || 0) - (a.sq || 0)).slice(0, 15)
+    .map(r => ({ s: r.s, c: r.c, p: r.p, f: r.f, sq: r.sq, sg: r.sg }));
+  // DEX hot (recently added DEX tokens with high volume)
+  const dexHot = rows.filter(r => r.c?.startsWith('DEX')).sort((a, b) => (b.m || 0) - (a.m || 0)).slice(0, 15)
+    .map(r => ({ s: r.s, c: r.c, p: r.p, ch: r.ch, f: r.f, m: r.m }));
+  // Top smart signals
+  const smart = [...rows].filter(r => r.sq >= 50).sort((a, b) => (b.sq || 0) - (a.sq || 0)).slice(0, 15)
+    .map(r => ({ s: r.s, c: r.c, p: r.p, f: r.f, sq: r.sq, sg: r.sg }));
+
+  res.json({ gainers, losers, whales, dexHot, smart });
 });
 
 // ─── Business Cycle Rotation ────────────────────────────────────────────────

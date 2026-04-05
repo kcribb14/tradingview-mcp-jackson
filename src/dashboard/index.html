@@ -96,6 +96,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
       <button class="btn" onclick="switchView('watchgrid')" id="navWatchgrid">★ Watchlist</button>
       <button class="btn active" onclick="switchView('signals')" id="navSignals">Signals</button>
       <button class="btn" onclick="switchView('cycle')" id="navCycle">Cycle</button>
+      <button class="btn" onclick="switchView('trending')" id="navTrending">Trending</button>
     </div>
     <span id="meta" style="font-size:11px;color:#848e9c">Loading...</span>
   </div>
@@ -144,6 +145,10 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <!-- Cycle view -->
 <div id="viewCycle" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
   <div id="cycleContent" style="color:#848e9c">Loading cycle data...</div>
+</div>
+<!-- Trending view -->
+<div id="viewTrending" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
+  <div id="trendingContent" style="color:#848e9c">Loading trending...</div>
 </div>
 <div class="pager" id="pager" style="display:none"></div>
 <div style="padding:8px 16px;font-size:10px;color:#5e6673;border-top:1px solid #1e2329;margin-top:4px">
@@ -649,6 +654,48 @@ function toggleFavDM(){if(!dmSym)return;toggleFav(dmSym);document.getElementById
 async function openInTV(){if(dmSym)fetch('/api/open-in-tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:dmSym})})}
 async function addToken(){const v=document.getElementById('addInput').value.trim();if(!v)return;document.getElementById('addInput').value='Adding...';try{const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})});const d=await r.json();document.getElementById('addInput').value='';if(d.token)alert('Added: '+d.token.symbol);else alert(d.error||'Failed');refresh()}catch(e){document.getElementById('addInput').value=v;alert(e.message)}}
 
+// ─── Trending View ──────────────────────────────────────────────────────────
+async function loadTrending(){
+  const el=document.getElementById('trendingContent');
+  el.innerHTML='Loading trending...';
+  try{
+    const r=await fetch('/api/trending');
+    const d=await r.json();
+    let html='';
+
+    function trendRow(r,showCh){
+      return'<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td>'+(showCh?'<td style="color:'+(r.ch>0?'#0ecb81':'#f6465d')+'">'+(r.ch>0?'+':'')+r.ch?.toFixed(1)+'%</td>':'')+'<td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td>'+(r.sq?'<td style="color:#f0b90b;font-weight:600">'+r.sq+'</td>':'')+'</tr>';
+    }
+
+    html+='<div class="sig-section"><div class="sig-title">📈 BIGGEST GAINERS</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Chg%</th><th>Price</th></tr>';
+    d.gainers?.forEach(r=>{html+=trendRow(r,true)});
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">📉 BIGGEST LOSERS — Potential Bounces</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Chg%</th><th>Price</th><th>Score</th></tr>';
+    d.losers?.forEach(r=>{html+=trendRow(r,true)});
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">🐋 WHALE ACCUMULATION — High Volume During Fear</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th><th>Score</th></tr>';
+    d.whales?.forEach(r=>{html+=trendRow(r,false)});
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">🔥 DEX HOT — Top DEX Tokens by Volume</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Chain</th><th>F&G</th><th>Chg%</th><th>Price</th></tr>';
+    d.dexHot?.forEach(r=>{html+=trendRow(r,true)});
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">🎯 TOP SMART SIGNALS (Score 50+)</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th><th>Score</th></tr>';
+    d.smart?.forEach(r=>{html+=trendRow(r,false)});
+    html+='</table></div>';
+
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='Error: '+e.message}
+}
+
 // ─── Cycle View ─────────────────────────────────────────────────────────────
 async function loadCycle(){
   const el=document.getElementById('cycleContent');
@@ -731,10 +778,10 @@ function switchView(view){
   curView=view;
   // Toggle view containers
   viewEls.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=id==='view'+view.charAt(0).toUpperCase()+view.slice(1)?'':'none'});
-  document.getElementById('viewScanner').style.display=view==='scanner'?'':'none';
-  document.getElementById('viewWatchgrid').style.display=view==='watchgrid'?'':'none';
-  document.getElementById('viewSignals').style.display=view==='signals'?'':'none';
-  document.getElementById('viewCycle').style.display=view==='cycle'?'':'none';
+  for(const v of ['Scanner','Watchgrid','Signals','Cycle','Trending']){
+    const el=document.getElementById('view'+v);
+    if(el)el.style.display=v.toLowerCase()===view?'':'none';
+  }
   // Show/hide scanner-specific elements
   const showScanner=view==='scanner';
   ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showScanner?'':'none'});
@@ -746,6 +793,7 @@ function switchView(view){
   if(view==='watchgrid')loadWatchlistGrid();
   if(view==='signals')loadSignals();
   if(view==='cycle')loadCycle();
+  if(view==='trending')loadTrending();
 }
 
 // ─── Watchlist Grid ─────────────────────────────────────────────────────────
