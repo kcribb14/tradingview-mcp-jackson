@@ -156,10 +156,11 @@ function rebuildData() {
     for (const r of rows) {
       if (r.w === 'ENTRY ZONE' || r.w === 'WATCHING') {
         const clsKey = { 'US Large Cap': 'US_LARGE_CAP', 'US Mid/Small': 'US_MID_SMALL', 'ASX Top 50': 'ASX_TOP50', 'ASX Mining Mid': 'ASX_MINING_MID', 'ASX Mining Micro': 'ASX_MINING_MICRO', 'Crypto Major': 'CRYPTO_MAJOR', 'Crypto Mid': 'CRYPTO_MID', 'Commodities': 'COMMODITIES', 'ETFs': 'ETFS' }[r.c] || 'US_MID_SMALL';
-        const result = scoreSignal(r, { threshold: r.f - (r.ss > 0 ? 5 : 0), classKey: clsKey });
-        r.sq = result.score; // signal quality
-        r.sg = result.grade; // signal grade
-        r.sf = result.factors; // signal factors
+        const cal = classifyCalibratedZone(r.s, r.f);
+        const result = scoreSignal(r, { threshold: cal.thresholds?.extreme_fear ?? -15, classKey: clsKey });
+        r.sq = result.score;
+        r.sg = result.grade;
+        r.sf = result.factors;
       }
     }
     rows.sort((a, b) => a.f - b.f);
@@ -686,10 +687,40 @@ async function bgWorkerLoop() {
   }
 }
 
+// ─── Push Notifications for Grade A Signals ─────────────────────────────────
+
+let previousGradeA = new Set();
+const NTFY_TOPIC = 'kieran-fg-signals';
+
+async function checkNewSignals() {
+  const gradeA = DATA.rows.filter(r => r.sg === 'A').map(r => r.s);
+  const newSignals = gradeA.filter(s => !previousGradeA.has(s));
+
+  if (newSignals.length > 0) {
+    for (const sym of newSignals.slice(0, 5)) { // Max 5 notifications per cycle
+      const row = DATA.rows.find(r => r.s === sym);
+      if (!row) continue;
+      const body = `${sym} scored ${row.sq}/100. F&G: ${row.f} (${row.z}). ${(row.sf||[])[0]?.name||''}: ${(row.sf||[])[0]?.val||''}. Price: $${row.p >= 1 ? row.p.toFixed(2) : row.p.toExponential(2)}`;
+      try {
+        await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+          method: 'POST',
+          headers: { 'Title': `Grade A: ${sym}`, 'Priority': 'high', 'Tags': 'chart_with_downwards_trend' },
+          body,
+          signal: AbortSignal.timeout(5000),
+        });
+        console.log(`Notification sent: ${sym} (${row.sq}/100)`);
+      } catch {}
+    }
+    if (newSignals.length > 5) console.log(`+${newSignals.length - 5} more Grade A signals (capped at 5 notifications)`);
+  }
+
+  previousGradeA = new Set(gradeA);
+}
+
 // ─── Start ──────────────────────────────────────────────────────────────────
 
 rebuildData();
-setInterval(rebuildData, 300000); // Refresh every 5 minutes
+setInterval(() => { rebuildData(); checkNewSignals(); }, 300000); // Refresh + check every 5 minutes
 
 // Get local network IP for phone access
 import { networkInterfaces } from 'os';
