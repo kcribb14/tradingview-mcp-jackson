@@ -250,7 +250,7 @@ app.get('/api/health', (req, res) => {
 
 // ─── Shared OHLCV fetcher (used by history endpoint + background worker) ────
 
-const YAHOO_RANGES = { '15': { range: '5d', interval: '15m' }, '60': { range: '1mo', interval: '1h' }, '240': { range: '6mo', interval: '1d' }, 'D': { range: '2y', interval: '1d' }, 'W': { range: '10y', interval: '1wk' } };
+const YAHOO_RANGES = { '15': { range: '60d', interval: '15m' }, '60': { range: '2y', interval: '1h' }, '240': { range: '2y', interval: '1d' }, 'D': { range: '5y', interval: '1d' }, 'W': { range: 'max', interval: '1wk' } };
 const BINANCE_INTERVALS = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
 
 async function fetchBars(sym, tf) {
@@ -263,7 +263,7 @@ async function fetchBars(sym, tf) {
       let pair = sym.replace(/[-\/]/g, '').toUpperCase();
       if (!pair.endsWith('USDT') && !pair.endsWith('USD')) pair += 'USDT';
       const bi = BINANCE_INTERVALS[tf] || '1d';
-      const limit = (tf === 'D' || tf === 'W') ? 500 : 200;
+      const limit = (tf === 'D' || tf === 'W' || tf === '240') ? 500 : 200;
       const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=${limit}`, { signal: AbortSignal.timeout(5000) });
       if (r.ok) {
         const d = await r.json();
