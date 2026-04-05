@@ -162,15 +162,19 @@ td{padding:6px 12px;white-space:nowrap}
       </h2>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="detailPrice" style="font-size:14px;color:#848e9c">—</span>
+        <button class="btn" onclick="openInTV()" style="font-size:11px;padding:4px 10px">Open in TV Desktop</button>
         <button class="modal-close" onclick="closeDetail()">✕</button>
       </div>
     </div>
     <div class="detail-charts">
-      <div class="detail-chart-top"><canvas id="detailPriceChart"></canvas></div>
+      <div class="detail-chart-top" id="detailChartTop">
+        <div id="tv-widget-container" style="width:100%;height:100%"></div>
+      </div>
       <div class="detail-chart-bottom"><canvas id="detailFGChart"></canvas></div>
     </div>
   </div>
 </div>
+<script src="https://s3.tradingview.com/tv.js"></script>
 
 <div class="cat-tabs" id="catTabs"></div>
 
@@ -635,59 +639,126 @@ async function toggleFavDetail(){
 
 // ─── Symbol Detail Modal ────────────────────────────────────────────────────
 
-let detailPriceChart=null,detailFGChart=null;
+let detailFGChart=null;
+let currentDetailSym=null;
+let tvWidget=null;
+
+// Map our symbol to TradingView widget format
+function mapToTV(sym,cat){
+  if(sym.endsWith('.AX'))return'ASX:'+sym.replace('.AX','');
+  if(sym.endsWith('.L'))return'LSE:'+sym.replace('.L','');
+  if(sym.endsWith('.TO'))return'TSX:'+sym.replace('.TO','');
+  if(cat?.includes('DEX'))return null; // No TV widget for DEX tokens
+  if(sym.includes('=F'))return'CME:'+sym.replace('=F','1!');
+  if(sym.includes('=X'))return'FX:'+sym.replace('=X','');
+  if(sym.startsWith('^'))return'TVC:'+sym.replace('^','');
+  // Crypto
+  const cryptoMajors=['BTC','ETH','SOL','XRP','BNB','ADA','DOGE','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR','ATOM'];
+  if(cryptoMajors.includes(sym))return'BINANCE:'+sym+'USDT';
+  // US stocks — try NASDAQ first (most common)
+  const nyse=['JPM','V','JNJ','PG','HD','DIS','BA','GS','GE','CAT','HON','MMM','WFC','BAC','KO','PEP','MCD','WMT'];
+  if(nyse.includes(sym))return'NYSE:'+sym;
+  return'NASDAQ:'+sym;
+}
 
 async function openDetail(sym){
+  currentDetailSym=sym;
   document.getElementById('detailBackdrop').classList.add('open');
   document.getElementById('detailSymbol').textContent=sym;
   document.getElementById('detailPrice').textContent='Loading...';
   document.getElementById('detailStar').className='star '+(FAVS.includes(sym)?'active':'');
   document.getElementById('detailStar').textContent=FAVS.includes(sym)?'★':'☆';
 
-  const r=await fetch('/api/history/'+encodeURIComponent(sym));
-  const d2=await r.json();
-  if(d2.error){document.getElementById('detailPrice').textContent=d2.error;return}
+  // Find the row to get category
+  const row=D?.rows?.find(r=>r.symbol===sym);
+  const tvSym=mapToTV(sym,row?.category);
 
-  const cur=d2.current;
-  const fc=cur.fg<-41?'z0':cur.fg<-25?'z1':cur.fg<-10?'z2':cur.fg<-5?'z2b':cur.fg<5?'z3':cur.fg<10?'z4':cur.fg<41?'z5':cur.fg<73?'z6':'z7';
-  document.getElementById('detailFG').className='fg-b '+fc;
-  document.getElementById('detailFG').textContent=(cur.fg>0?'+':'')+cur.fg.toFixed(1)+' '+cur.zone;
-  document.getElementById('detailPrice').textContent='$'+cur.price.toFixed(cur.price>=1?2:6);
+  // TradingView widget or fallback
+  const container=document.getElementById('tv-widget-container');
+  container.innerHTML='';
 
-  // Price chart
-  const labels=d2.ohlcv.map(b=>new Date(b.t).toLocaleDateString());
-  const prices=d2.ohlcv.map(b=>b.c);
+  if(tvSym && typeof TradingView!=='undefined'){
+    try{
+      container.id='tv-widget-'+Date.now(); // Fresh ID for widget
+      document.getElementById('detailChartTop').replaceChild(container, document.getElementById('detailChartTop').firstChild);
+      new TradingView.widget({
+        container_id:container.id,
+        symbol:tvSym,
+        interval:'D',
+        theme:'dark',
+        style:'1',
+        locale:'en',
+        toolbar_bg:'#181a20',
+        enable_publishing:false,
+        hide_side_toolbar:false,
+        allow_symbol_change:true,
+        width:'100%',
+        height:'100%',
+        backgroundColor:'#181a20',
+        gridColor:'#2b2f36',
+      });
+    }catch(e){
+      container.innerHTML='<div style=\"padding:20px;color:#848e9c;text-align:center\">TradingView widget unavailable<br><small>'+e.message+'</small></div>';
+    }
+  }else{
+    // Fallback: Chart.js price chart for DEX tokens
+    container.innerHTML='<canvas id=\"fallbackPriceChart\" style=\"width:100%;height:100%\"></canvas>';
+    const r2=await fetch('/api/history/'+encodeURIComponent(sym));
+    const d2=await r2.json();
+    if(!d2.error && d2.ohlcv?.length>0){
+      const labels2=d2.ohlcv.map(b=>new Date(b.t).toLocaleDateString());
+      const prices2=d2.ohlcv.map(b=>b.c);
+      new Chart(document.getElementById('fallbackPriceChart'),{
+        type:'line',data:{labels:labels2,datasets:[{data:prices2,borderColor:'#f0b90b',borderWidth:1.5,pointRadius:0,fill:false}]},
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false}},
+          scales:{x:{display:false},y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c'}}}}
+      });
+    }else{
+      container.innerHTML='<div style=\"padding:40px;color:#848e9c;text-align:center\">No chart data available for DEX token<br><small>'+sym+'</small></div>';
+    }
+  }
 
-  if(detailPriceChart)detailPriceChart.destroy();
-  const pCtx=document.getElementById('detailPriceChart');
-  detailPriceChart=new Chart(pCtx,{
-    type:'line',
-    data:{labels,datasets:[{data:prices,borderColor:'#f0b90b',borderWidth:1.5,pointRadius:0,fill:false}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},tooltip:{mode:'index',intersect:false}},
-      scales:{x:{display:false},y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c',callback:v=>'$'+v.toFixed(prices[0]>=1?2:4)}}}}
-  });
+  // F&G chart below
+  const r3=await fetch('/api/history/'+encodeURIComponent(sym));
+  const d3=await r3.json();
 
-  // F&G chart with colored segments
-  const fgVals=d2.fg.map(f=>f.v);
-  const fgLabels=d2.fg.map(f=>new Date(f.t).toLocaleDateString());
-  // Color each point
-  const fgColors=fgVals.map(v=>v<-10?'#0ecb81':v<-5?'#65a095':v<5?'#A19F8F':v<10?'#c8b86a':v<25?'#ff9800':'#f6465d');
+  if(!d3.error && d3.current){
+    const cur=d3.current;
+    const fc=cur.fg<-41?'z0':cur.fg<-25?'z1':cur.fg<-10?'z2':cur.fg<-5?'z2b':cur.fg<5?'z3':cur.fg<10?'z4':cur.fg<41?'z5':cur.fg<73?'z6':'z7';
+    document.getElementById('detailFG').className='fg-b '+fc;
+    document.getElementById('detailFG').textContent=(cur.fg>0?'+':'')+cur.fg.toFixed(1)+' '+(cur.zone||'');
+    document.getElementById('detailPrice').textContent=cur.price>=1?'$'+cur.price.toFixed(2):'$'+cur.price.toFixed(6);
+  }
 
-  if(detailFGChart)detailFGChart.destroy();
-  const fCtx=document.getElementById('detailFGChart');
-  detailFGChart=new Chart(fCtx,{
-    type:'line',
-    data:{labels:fgLabels,datasets:[{data:fgVals,borderColor:ctx=>{const i=ctx.p0DataIndex;return fgColors[i]||'#848e9c'},
-      segment:{borderColor:ctx=>fgColors[ctx.p0DataIndex]||'#848e9c'},
-      borderWidth:2,pointRadius:0,fill:false}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},
-      tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'F&G: '+(ctx.raw>0?'+':'')+ctx.raw.toFixed(1)}}},
-      scales:{x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:10}}},
-        y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c'}}}}
-  });
+  if(d3.fg?.length>0){
+    const fgVals=d3.fg.map(f=>f.v);
+    const fgLabels=d3.fg.map(f=>new Date(f.t).toLocaleDateString());
+    const fgColors=fgVals.map(v=>v<-25?'#ff5252':v<-10?'#ff9800':v<-5?'#c8b86a':v<5?'#A19F8F':v<10?'#65a095':v<41?'#50b050':'#2e8f2e');
+    if(detailFGChart)detailFGChart.destroy();
+    detailFGChart=new Chart(document.getElementById('detailFGChart'),{
+      type:'line',
+      data:{labels:fgLabels,datasets:[{data:fgVals,segment:{borderColor:ctx=>fgColors[ctx.p0DataIndex]||'#848e9c'},borderWidth:2,pointRadius:0,fill:false}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false},
+        tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'F&G: '+(ctx.raw>0?'+':'')+ctx.raw.toFixed(1)}}},
+        scales:{x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:10}}},
+          y:{position:'right',grid:{color:'#1e232940'},ticks:{color:'#848e9c'}}}}
+    });
+  }
 }
 
-function closeDetail(){document.getElementById('detailBackdrop').classList.remove('open')}
+function closeDetail(){
+  document.getElementById('detailBackdrop').classList.remove('open');
+  // Clean up widget
+  const container=document.getElementById('tv-widget-container')||document.getElementById('detailChartTop')?.firstChild;
+  if(container)container.innerHTML='';
+}
+
+async function openInTV(){
+  if(!currentDetailSym)return;
+  try{
+    await fetch('/api/open-in-tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:currentDetailSym})});
+  }catch{}
+}
 
 async function addToken(){
   const input=document.getElementById('addTokenInput').value.trim();

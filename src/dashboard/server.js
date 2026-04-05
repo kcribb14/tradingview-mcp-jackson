@@ -154,6 +154,21 @@ app.post('/api/track', (req, res) => {
   } catch (e) { res.json({ error: e.message }); }
 });
 
+// ─── Open in TradingView Desktop ────────────────────────────────────────────
+
+app.post('/api/open-in-tv', async (req, res) => {
+  try {
+    const sym = req.body.symbol;
+    if (!sym) return res.json({ error: 'No symbol' });
+    // Try to import chart module and set symbol
+    const { setSymbol } = await import('../core/chart.js');
+    await setSymbol({ symbol: sym });
+    res.json({ success: true, symbol: sym });
+  } catch (e) {
+    res.json({ error: 'TradingView Desktop not connected: ' + e.message?.slice(0, 60) });
+  }
+});
+
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
 
 // ─── Build data ─────────────────────────────────────────────────────────────
