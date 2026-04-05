@@ -58,13 +58,30 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 .dm-top{flex:2;min-height:0;position:relative}.dm-bot{flex:1;min-height:0;border-top:1px solid #2b2f36;position:relative}
 .dm-top>div,.dm-bot canvas{width:100%!important;height:100%!important}
 .dm-close{background:none;border:none;color:#848e9c;font-size:18px;cursor:pointer}
+.wg-cell{background:#181a20;border:1px solid #2b2f36;border-radius:6px;overflow:hidden;cursor:pointer;transition:.15s}
+.wg-cell:hover{border-color:#f0b90b33}
+.wg-hdr{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid #2b2f36;background:#1e2329}
+.wg-hdr .sym{font-weight:600;font-size:14px}.wg-hdr .pr{color:#848e9c;font-size:11px}
+.wg-chart{height:220px;position:relative}
+.wg-chart canvas{position:absolute;top:0;left:0}
+.sig-section{margin-bottom:16px}.sig-title{font-size:13px;font-weight:600;color:#f0b90b;border-bottom:1px solid #2b2f36;padding-bottom:4px;margin-bottom:8px}
+.sig-table{width:100%;border-collapse:collapse;font-size:12px}.sig-table th{text-align:left;color:#848e9c;padding:4px 8px;border-bottom:1px solid #2b2f36}
+.sig-table td{padding:4px 8px;border-bottom:1px solid #1e2329}
 @media(max-width:768px){.sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}.sidebar .card{min-width:160px}.chart-box{height:300px}.hm{display:none}}
 </style>
 </head>
 <body>
 
 <div class="hdr">
-  <div><h1>F&G <span>Scanner</span></h1><span id="meta" style="font-size:11px;color:#848e9c">Loading...</span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <h1>F&G <span>Scanner</span></h1>
+    <div id="navTabs" style="display:flex;gap:4px">
+      <button class="btn active" onclick="switchView('scanner')" id="navScanner">Scanner</button>
+      <button class="btn" onclick="switchView('watchgrid')" id="navWatchgrid">★ Watchlist</button>
+      <button class="btn" onclick="switchView('signals')" id="navSignals">Signals</button>
+    </div>
+    <span id="meta" style="font-size:11px;color:#848e9c">Loading...</span>
+  </div>
   <div class="hdr-r">
     <input id="addInput" placeholder="DexScreener URL or contract...">
     <button class="btn" onclick="addToken()">+ Add</button>
@@ -72,12 +89,12 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   </div>
 </div>
 <div class="tf-bar" id="tfBar"></div>
-<div class="main">
+<div class="main" id="mainArea">
   <div class="sidebar" id="sidebar"></div>
   <div class="chart-area"><div class="chart-box"><canvas id="scatter"></canvas></div></div>
 </div>
 <div class="cat-bar" id="catBar"></div>
-<div class="filters">
+<div class="filters" id="filters">
   <input id="search" placeholder="Search symbol..." oninput="renderTable()">
   <button class="btn" onclick="applyPreset('fear')">Fear</button>
   <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
@@ -85,7 +102,26 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('greed')">Greed</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
+<!-- Scanner view (default) -->
+<div id="viewScanner">
 <div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
+</div>
+<!-- Watchlist Grid view -->
+<div id="viewWatchgrid" style="display:none;padding:12px">
+  <div style="display:flex;gap:4px;margin-bottom:10px;justify-content:center" id="wgTFBar">
+    <button class="btn active" onclick="switchWgTF('D')">Daily</button>
+    <button class="btn" onclick="switchWgTF('60')">1H</button>
+    <button class="btn" onclick="switchWgTF('240')">4H</button>
+    <button class="btn" onclick="switchWgTF('15')">15m</button>
+    <button class="btn" onclick="switchWgTF('W')">Weekly</button>
+  </div>
+  <div id="wgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:10px"></div>
+  <div id="wgEmpty" style="text-align:center;padding:40px;color:#848e9c;display:none">No watchlist symbols. Star ★ symbols from the Scanner to add them here.</div>
+</div>
+<!-- Signals view -->
+<div id="viewSignals" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
+  <div id="signalsContent" style="color:#848e9c">Loading signals...</div>
+</div>
 <div class="pager" id="pager"></div>
 <div style="padding:8px 16px;font-size:10px;color:#5e6673;border-top:1px solid #1e2329;margin-top:4px">
 DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate of return, money flow, volatility, gold. Backtest-validated on 149 symbols: +114% avg return, 69% WR, Sharpe 2.15 (p<0.01). Data: on-demand from Yahoo/Binance, cached with TTL-based freshness.
@@ -100,6 +136,13 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
       <div style="display:flex;gap:6px;align-items:center">
         <span id="dmPrice" style="font-size:12px;color:#848e9c">—</span>
         <div id="dmTFButtons" style="display:flex;gap:3px"></div>
+        <select id="dmCompare" onchange="switchCompare(this.value)" style="background:#2b2f36;border:1px solid #363a45;color:#848e9c;font-size:10px;padding:2px 4px;border-radius:4px">
+          <option value="">Compare...</option>
+          <option value="BTC">vs BTC</option>
+          <option value="ETH">vs ETH</option>
+          <option value="SPY">vs SPY</option>
+          <option value="GC=F">vs Gold</option>
+        </select>
         <button class="btn" onclick="openInTV()" style="font-size:10px;padding:3px 8px">Open in TV</button>
         <button class="dm-close" onclick="closeDM()">✕</button>
       </div>
@@ -472,15 +515,31 @@ async function loadFGChart(sym,tf){
         if(v2<-41)return'#910000';if(v2<-25)return'#ff5252';if(v2<-10)return'#ff9800';
         if(v2<-5)return'#c8b86a';if(v2<5)return'#A19F8F';if(v2<10)return'#65a095';
         if(v2<41)return'#50b050';if(v2<73)return'#2e8f2e';return'#006400';}}});
+    // Add comparison overlay if selected
+    if(dmCompSym&&dmCompSym!==sym){try{
+      const cr=await fetch('/api/history/'+encodeURIComponent(dmCompSym)+'?tf='+tf);
+      const cd=await cr.json();
+      if(cd.fg?.length>0){
+        // Normalize to same length by taking last N points
+        const compFg=cd.fg.map(x=>x.v);
+        const len=Math.min(fv.length,compFg.length);
+        const trimmed=compFg.slice(-len);
+        // Pad if needed
+        const padded=fv.length>len?[...Array(fv.length-len).fill(null),...trimmed]:trimmed.slice(-fv.length);
+        ds.push({label:dmCompSym+' F&G',data:padded,borderColor:'rgba(100,149,237,0.6)',borderDash:[4,3],borderWidth:1.5,pointRadius:0,yAxisID:'fg',tension:0.1,order:3});
+      }
+    }catch{}}
     dmFGChart=new Chart(canvas,{type:'line',data:{labels,datasets:ds},
       plugins:[dgtZoneBands],
       options:{responsive:true,maintainAspectRatio:false,
         interaction:{mode:'index',intersect:false},
         plugins:{legend:{display:false},datalabels:{display:false},
           tooltip:{callbacks:{label:ctx=>{
+            if(ctx.raw==null)return null;
             if(ctx.dataset.label==='Price')return'Price: $'+(ctx.raw>=1?ctx.raw.toFixed(2):ctx.raw.toFixed(6));
             const v=ctx.raw;const zn=v<-41?'Despondency':v<-25?'Panic':v<-10?'Fear':v<-5?'Anxiety':v<5?'Balanced':v<10?'Optimism':v<41?'Excitement':v<73?'Thrill':'Euphoria';
-            return'F&G: '+(v>0?'+':'')+v.toFixed(1)+' ('+zn+')';
+            const lbl=ctx.dataset.label||'F&G';
+            return lbl+': '+(v>0?'+':'')+v.toFixed(1)+' ('+zn+')';
           }}}},
         scales:{
           x:{grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:9}}},
@@ -499,8 +558,15 @@ function fmtTime(ts,tf){
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
 }
 
+let dmCompSym='';
+async function switchCompare(comp){
+  dmCompSym=comp;
+  await loadFGChart(dmSym,dmTF); // Reload chart with comparison overlay
+}
+
 async function openDM(sym,cat){
-  dmSym=sym;dmCat=cat||'';dmTF='D';
+  dmSym=sym;dmCat=cat||'';dmTF='D';dmCompSym='';
+  const cmpSel=document.getElementById('dmCompare');if(cmpSel)cmpSel.value='';
   document.getElementById('dmBg').classList.add('open');
   document.getElementById('dmSym').textContent=sym;document.getElementById('dmPrice').textContent='...';
   document.getElementById('dmStar').className='star '+(FAVS.includes(sym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(sym)?'★':'☆';
@@ -514,6 +580,137 @@ function closeDM(){document.getElementById('dmBg').classList.remove('open');docu
 function toggleFavDM(){if(!dmSym)return;toggleFav(dmSym);document.getElementById('dmStar').className='star '+(FAVS.includes(dmSym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(dmSym)?'★':'☆'}
 async function openInTV(){if(dmSym)fetch('/api/open-in-tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:dmSym})})}
 async function addToken(){const v=document.getElementById('addInput').value.trim();if(!v)return;document.getElementById('addInput').value='Adding...';try{const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})});const d=await r.json();document.getElementById('addInput').value='';if(d.token)alert('Added: '+d.token.symbol);else alert(d.error||'Failed');refresh()}catch(e){document.getElementById('addInput').value=v;alert(e.message)}}
+
+// ─── View switching ─────────────────────────────────────────────────────────
+let curView='scanner';
+const viewEls=['viewScanner','viewWatchgrid','viewSignals'];
+const scannerEls=['tfBar','sidebar','catBar','filters','pager']; // elements to show only in scanner view
+
+function switchView(view){
+  curView=view;
+  // Toggle view containers
+  viewEls.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=id==='view'+view.charAt(0).toUpperCase()+view.slice(1)?'':'none'});
+  document.getElementById('viewScanner').style.display=view==='scanner'?'':'none';
+  document.getElementById('viewWatchgrid').style.display=view==='watchgrid'?'':'none';
+  document.getElementById('viewSignals').style.display=view==='signals'?'':'none';
+  // Show/hide scanner-specific elements
+  const showScanner=view==='scanner';
+  ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showScanner?'':'none'});
+  // Nav active state
+  document.querySelectorAll('#navTabs .btn').forEach(b=>b.classList.remove('active'));
+  const nav=document.getElementById('nav'+view.charAt(0).toUpperCase()+view.slice(1));
+  if(nav)nav.classList.add('active');
+  // Load view data
+  if(view==='watchgrid')loadWatchlistGrid();
+  if(view==='signals')loadSignals();
+}
+
+// ─── Watchlist Grid ─────────────────────────────────────────────────────────
+let wgTF='D';const wgCharts={};
+
+function switchWgTF(tf){
+  wgTF=tf;
+  document.querySelectorAll('#wgTFBar .btn').forEach(b=>{b.classList.toggle('active',b.textContent.includes({'D':'Daily','60':'1H','240':'4H','15':'15m','W':'Weekly'}[tf]))});
+  loadWatchlistGrid();
+}
+
+async function loadWatchlistGrid(){
+  const grid=document.getElementById('wgGrid');
+  const empty=document.getElementById('wgEmpty');
+  // Destroy existing charts
+  Object.values(wgCharts).forEach(c=>c.destroy());
+  for(const k in wgCharts)delete wgCharts[k];
+  grid.innerHTML='';
+
+  if(!FAVS||FAVS.length===0){empty.style.display='';grid.style.display='none';return}
+  empty.style.display='none';grid.style.display='';
+
+  // Update nav badge
+  const nav=document.getElementById('navWatchgrid');
+  if(nav)nav.textContent='★ Watchlist ('+FAVS.length+')';
+
+  for(const sym of FAVS){
+    const cell=document.createElement('div');
+    cell.className='wg-cell';
+    cell.onclick=()=>openDM(sym);
+    cell.innerHTML='<div class="wg-hdr"><span class="sym">'+sym+'</span><span class="pr" id="wg-pr-'+sym+'">Loading...</span></div><div class="wg-chart"><canvas id="wg-cv-'+sym+'"></canvas></div>';
+    grid.appendChild(cell);
+
+    // Fetch data
+    loadWgChart(sym);
+  }
+}
+
+async function loadWgChart(sym){
+  try{
+    const r=await fetch('/api/history/'+encodeURIComponent(sym)+'?tf='+wgTF);
+    const d=await r.json();
+    const prEl=document.getElementById('wg-pr-'+sym);
+    if(d.current){
+      const pr=d.current.price;const fg=d.current.fg;
+      const fc=fg!=null?fgColor(fg):'#848e9c';
+      prEl.innerHTML='$'+(pr>=1?pr.toFixed(2):pr>0.001?pr.toFixed(4):pr?.toExponential(2)||'—')+' <span style="padding:1px 5px;border-radius:3px;font-size:10px;background:'+fc+'22;color:'+fc+'">'+(fg!=null?(fg>0?'+':'')+fg.toFixed(1):'—')+'</span>';
+    }
+    const cv=document.getElementById('wg-cv-'+sym);if(!cv)return;
+    if(wgCharts[sym])wgCharts[sym].destroy();
+    if(!d.fg||d.fg.length===0){if(d.ohlcv?.length>0){
+      const labels=d.ohlcv.map(b=>fmtTime(b.t,wgTF));
+      wgCharts[sym]=new Chart(cv,{type:'line',data:{labels,datasets:[{data:d.ohlcv.map(b=>b.c),borderColor:'#eaecef',borderWidth:1.2,pointRadius:0,tension:0.1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false}},scales:{x:{display:false},y:{display:false}}}});
+    }return}
+    const labels=d.fg.map(x=>fmtTime(x.t,wgTF));
+    const fv=d.fg.map(x=>x.v);
+    const pv=d.ohlcv?.map(b=>b.c)||[];
+    const ds=[];
+    if(pv.length===fv.length)ds.push({data:pv,borderColor:'#eaecef',borderWidth:1.2,pointRadius:0,yAxisID:'price',tension:0.1});
+    ds.push({data:fv,borderWidth:1.5,pointRadius:0,yAxisID:'fg',tension:0.1,segment:{borderColor:ctx=>{const v=ctx.p1?.parsed?.y??0;if(v<-41)return'#910000';if(v<-25)return'#ff5252';if(v<-10)return'#ff9800';if(v<-5)return'#c8b86a';if(v<5)return'#A19F8F';if(v<10)return'#65a095';if(v<41)return'#50b050';if(v<73)return'#2e8f2e';return'#006400'}}});
+    wgCharts[sym]=new Chart(cv,{type:'line',data:{labels,datasets:ds},plugins:[dgtZoneBands],options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false}},scales:{x:{display:true,grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:5,font:{size:8}}},price:{display:false},fg:{position:'right',min:-60,max:100,grid:{display:false},ticks:{display:false}}}}});
+  }catch(e){console.error('WG chart error for '+sym+':',e)}
+}
+
+// ─── Signals View ───────────────────────────────────────────────────────────
+async function loadSignals(){
+  const el=document.getElementById('signalsContent');
+  el.innerHTML='Loading signals...';
+  try{
+    const r=await fetch('/api/cached?limit=500&sort=f&order=asc');
+    const d=await r.json();
+    const rows=d.symbols||[];
+    const entry=rows.filter(r=>r.w==='ENTRY ZONE');
+    const watching=rows.filter(r=>r.w==='WATCHING');
+    const exit=rows.filter(r=>r.w==='TAKE PROFIT'||r.w==='EXIT ZONE');
+
+    // Key assets for regime
+    const regime=(d.keyAssets||[]).map(a=>'<span style="margin-right:12px">'+a.s+': <span style="color:'+fgColor(a.f)+'">'+(a.f>0?'+':'')+a.f.toFixed(1)+'</span></span>').join('');
+
+    let html='<div class="sig-section"><div class="sig-title">REGIME STATUS</div><div style="padding:4px 0;font-size:12px">'+regime+'</div></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">ENTRY SIGNALS ('+d.signals?.entry+' total, showing top 30)</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Zone</th><th>Price</th><th>Action</th></tr>';
+    entry.slice(0,30).forEach(r=>{
+      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td><td><button class="btn" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openDM(\''+r.s+'\',\''+r.c+'\')">View</button></td></tr>';
+    });
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">WATCHING ('+d.signals?.watching+' total, showing top 20)</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th></tr>';
+    watching.slice(0,20).forEach(r=>{
+      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td>'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p?.toExponential(2)||'—')+'</td></tr>';
+    });
+    html+='</table></div>';
+
+    html+='<div class="sig-section"><div class="sig-title">EXIT SIGNALS ('+d.signals?.exit+' total, showing top 15)</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th></tr>';
+    const exitSorted=[...rows].filter(r=>r.w==='TAKE PROFIT'||r.w==='EXIT ZONE').sort((a,b)=>b.f-a.f);
+    exitSorted.slice(0,15).forEach(r=>{
+      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td>'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p?.toExponential(2)||'—')+'</td></tr>';
+    });
+    html+='</table></div>';
+
+    el.innerHTML=html;
+    // Update nav badge
+    document.getElementById('navSignals').textContent='Signals ('+entry.length+')';
+  }catch(e){el.innerHTML='Error loading signals: '+e.message}
+}
 
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
