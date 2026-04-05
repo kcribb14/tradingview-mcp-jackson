@@ -6,6 +6,7 @@
 <title>F&G Scanner</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <script src="https://s3.tradingview.com/tv.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -154,7 +155,30 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <div class="tf-bar scanner-hidden" id="tfBar"></div>
 <div class="main scanner-hidden" id="mainArea">
   <div class="sidebar" id="sidebar"></div>
-  <div class="chart-area"><div class="chart-box"><canvas id="scatter"></canvas></div></div>
+  <div class="chart-area">
+    <div class="chart-box" style="position:relative"><canvas id="scatter"></canvas><canvas id="selectOverlay" style="position:absolute;top:0;left:0;pointer-events:none"></canvas></div>
+  </div>
+</div>
+<div id="comparePanel" class="scanner-hidden" style="display:none;padding:8px 16px;background:#12151a;border-top:2px solid #f0b90b44">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div style="display:flex;gap:4px;align-items:center">
+      <span id="compareTitleText" style="font-size:12px;font-weight:600;color:#eaecef">Comparing</span>
+      <button class="btn" onclick="setCmpMode('fg')" id="cmpModeFG" style="font-size:10px;padding:2px 6px">F&G</button>
+      <button class="btn" onclick="setCmpMode('price')" id="cmpModePrice" style="font-size:10px;padding:2px 6px">Price %</button>
+      <button class="btn active" onclick="setCmpMode('both')" id="cmpModeBoth" style="font-size:10px;padding:2px 6px">Both</button>
+      <span style="color:#2b2f36;margin:0 2px">|</span>
+      <button class="btn" onclick="setCmpRange(30)" style="font-size:10px;padding:2px 6px">1M</button>
+      <button class="btn active" onclick="setCmpRange(90)" style="font-size:10px;padding:2px 6px">3M</button>
+      <button class="btn" onclick="setCmpRange(365)" style="font-size:10px;padding:2px 6px">1Y</button>
+      <button class="btn" onclick="setCmpRange(0)" style="font-size:10px;padding:2px 6px">ALL</button>
+    </div>
+    <button class="btn" onclick="closeCompare()" style="font-size:12px;padding:2px 8px">✕ Close</button>
+  </div>
+  <div style="display:flex;gap:8px" id="cmpChartArea">
+    <div style="flex:1;position:relative;height:350px"><canvas id="cmpPriceChart"></canvas></div>
+    <div style="flex:1;position:relative;height:350px"><canvas id="cmpFGChart"></canvas></div>
+  </div>
+  <div id="cmpSymList" style="font-size:10px;color:#848e9c;padding:4px 0"></div>
 </div>
 <div class="cat-bar scanner-hidden" id="catBar"></div>
 <div id="sectorBandSection" class="scanner-hidden" style="display:none;padding:8px 16px">
@@ -515,6 +539,140 @@ function renderTable(){
   pgHtml+='</select>';
   document.getElementById('pager').innerHTML=
     '<span style="font-size:11px">Showing '+(pageStart+1)+'-'+Math.min(pageStart+rows.length,D.total||0)+' of '+(D.total||0)+'</span><span>'+pgHtml+'</span>';
+}
+
+// ─── Drag-Select on Scatter + Comparison Overlay ────────────────────────────
+let isDragging=false,dragStartX=0,dragStartY=0,cmpSymbols=[],cmpMode='both',cmpRangeDays=90;
+let cmpPriceChart=null,cmpFGChart2=null;
+
+(function initDragSelect(){
+  const scatter=document.getElementById('scatter');
+  const overlay=document.getElementById('selectOverlay');
+  if(!scatter||!overlay)return;
+
+  scatter.addEventListener('mousedown',e=>{
+    if(!chart)return;
+    const rect=scatter.getBoundingClientRect();
+    dragStartX=e.clientX-rect.left;dragStartY=e.clientY-rect.top;
+    isDragging=true;
+    overlay.width=scatter.width;overlay.height=scatter.height;
+    overlay.style.pointerEvents='none';
+  });
+  scatter.addEventListener('mousemove',e=>{
+    if(!isDragging||!chart)return;
+    const rect=scatter.getBoundingClientRect();
+    const cx=e.clientX-rect.left,cy=e.clientY-rect.top;
+    const ctx=overlay.getContext('2d');
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    ctx.strokeStyle='#f0b90b';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
+    ctx.fillStyle='rgba(240,185,11,0.08)';
+    const x=Math.min(dragStartX,cx),y=Math.min(dragStartY,cy),w=Math.abs(cx-dragStartX),h=Math.abs(cy-dragStartY);
+    ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
+  });
+  scatter.addEventListener('mouseup',e=>{
+    if(!isDragging||!chart)return;
+    isDragging=false;
+    const rect=scatter.getBoundingClientRect();
+    const endX=e.clientX-rect.left,endY=e.clientY-rect.top;
+    // Clear overlay
+    overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);
+    // Check if it was a real drag (not a click)
+    if(Math.abs(endX-dragStartX)<10&&Math.abs(endY-dragStartY)<10)return;
+    // Find dots in selection rectangle
+    const xS=chart.scales.x,yS=chart.scales.y;
+    const x1=xS.getValueForPixel(Math.min(dragStartX,endX));
+    const x2=xS.getValueForPixel(Math.max(dragStartX,endX));
+    const y1=yS.getValueForPixel(Math.max(dragStartY,endY));
+    const y2=yS.getValueForPixel(Math.min(dragStartY,endY));
+    const fk=tfKey[cTF]||'f';
+    const dots=(D.scatterDots||[]).filter(r=>{
+      const fx=r.m,fy=r[fk]??r.f;
+      return fx>=Math.min(x1,x2)&&fx<=Math.max(x1,x2)&&fy>=y1&&fy<=y2;
+    });
+    if(dots.length>=2&&dots.length<=30){
+      cmpSymbols=dots.map(d=>d.s);
+      openCompare();
+    }else if(dots.length>30){
+      alert('Selected '+dots.length+' symbols — max 30. Zoom in or narrow the selection.');
+    }
+  });
+})();
+
+function setCmpMode(m){
+  cmpMode=m;
+  document.getElementById('cmpModeFG').classList.toggle('active',m==='fg');
+  document.getElementById('cmpModePrice').classList.toggle('active',m==='price');
+  document.getElementById('cmpModeBoth').classList.toggle('active',m==='both');
+  const area=document.getElementById('cmpChartArea');
+  area.children[0].style.display=(m==='fg')?'none':'';
+  area.children[1].style.display=(m==='price')?'none':'';
+  renderCompare();
+}
+function setCmpRange(d){cmpRangeDays=d;renderCompare()}
+function closeCompare(){document.getElementById('comparePanel').style.display='none';cmpSymbols=[]}
+
+async function openCompare(){
+  document.getElementById('comparePanel').style.display='';
+  document.getElementById('compareTitleText').textContent='Comparing '+cmpSymbols.length+' symbols';
+  document.getElementById('cmpSymList').textContent=cmpSymbols.join(' · ');
+  setCmpMode(cmpMode);
+  renderCompare();
+}
+
+async function renderCompare(){
+  if(cmpSymbols.length<2)return;
+  // Fetch history for all symbols
+  const allData={};
+  await Promise.all(cmpSymbols.map(async sym=>{
+    try{
+      const r=await fetch('/api/history/'+encodeURIComponent(sym)+'?tf=D');
+      allData[sym]=await r.json();
+    }catch{}
+  }));
+
+  // Common dates
+  const allDates=new Set();
+  for(const d of Object.values(allData))d.fg?.forEach(p=>allDates.add(p.t));
+  let dates=[...allDates].sort();
+  if(cmpRangeDays>0){const cut=Date.now()-cmpRangeDays*86400000;dates=dates.filter(t=>t>=cut)}
+  const labels=dates.map(t=>fmtTime(t,'D'));
+  const colors=WG_COLORS;
+
+  // Price chart
+  if(cmpPriceChart){cmpPriceChart.destroy();cmpPriceChart=null}
+  if(cmpMode!=='fg'){
+    const pDs=[];
+    cmpSymbols.forEach((sym,i)=>{
+      const d=allData[sym];if(!d?.ohlcv)return;
+      const vMap=new Map();d.ohlcv.forEach(p=>vMap.set(p.t,p.c));
+      const firstVal=dates.map(t=>vMap.get(t)).find(v=>v!=null);
+      const data=dates.map(t=>{const v=vMap.get(t);return v!=null&&firstVal?Math.round((v/firstVal-1)*10000)/100:null});
+      pDs.push({label:sym,data,borderColor:colors[i%colors.length],borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
+    });
+    cmpPriceChart=new Chart(document.getElementById('cmpPriceChart'),{type:'line',data:{labels,datasets:pDs},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'top',labels:{color:'#848e9c',font:{size:9},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false},
+          zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}}},
+        scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:8,font:{size:9}}},y:{grid:{color:'#1e232920'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v+'%'}}}}});
+  }
+
+  // F&G chart
+  if(cmpFGChart2){cmpFGChart2.destroy();cmpFGChart2=null}
+  if(cmpMode!=='price'){
+    const fDs=[];
+    cmpSymbols.forEach((sym,i)=>{
+      const d=allData[sym];if(!d?.fg)return;
+      const vMap=new Map();d.fg.forEach(p=>vMap.set(p.t,p.v));
+      const data=dates.map(t=>vMap.get(t)??null);
+      fDs.push({label:sym,data,borderColor:colors[i%colors.length],borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
+    });
+    cmpFGChart2=new Chart(document.getElementById('cmpFGChart'),{type:'line',data:{labels,datasets:fDs},
+      plugins:[dgtZoneBands],
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'top',labels:{color:'#848e9c',font:{size:9},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false},
+          zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}}},
+        scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:8,font:{size:9}}},y:{min:-60,max:100,grid:{color:'#1e232920'},ticks:{color:'#848e9c'}}}}});
+  }
 }
 
 function goPage(d){curPage=Math.max(1,Math.min(D.pages||1,curPage+d));loadPage(curPage)}
