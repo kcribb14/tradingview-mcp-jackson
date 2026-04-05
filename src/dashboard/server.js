@@ -1275,3 +1275,37 @@ app.listen(PORT, '0.0.0.0', () => {
     bgWorkerLoop().catch(e => console.error('Worker error:', e.message));
   }, 10000);
 });
+
+// ─── Self-healing: crash handlers + heartbeat ────────────────────────────────
+
+function gracefulShutdown(sig) {
+  console.log(`Received ${sig}, saving cache...`);
+  try { _saveCache(loadCache()); } catch {}
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err.message, err.stack?.slice(0, 200));
+  try { _saveCache(loadCache()); } catch {}
+  // Don't exit — let launchd KeepAlive restart us
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', String(reason).slice(0, 200));
+});
+
+// Heartbeat log every 5 minutes
+const HEARTBEAT_FILE = join(HOME, '.tradingview-mcp', 'logs', 'heartbeat.log');
+setInterval(() => {
+  try {
+    const dir = join(HOME, '.tradingview-mcp', 'logs');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const mem = process.memoryUsage();
+    const entry = JSON.stringify({
+      t: new Date().toISOString(), up: Math.round(process.uptime()),
+      mem: Math.round(mem.heapUsed / 1e6) + 'MB', syms: DATA.stats?.total || 0,
+      worker: workerStatus.state, warmed: workerStatus.warmed,
+    }) + '\n';
+    writeFileSync(HEARTBEAT_FILE, entry, { flag: 'a' });
+  } catch {}
+}, 300000);
