@@ -20,7 +20,7 @@ import { classifyZone } from './fg_scanner.js';
 const CACHE_DIR = join(homedir(), '.tradingview-mcp', 'cache');
 const SCORES_FILE = join(CACHE_DIR, 'fg_scores.json');
 const GLOBALS_FILE = join(CACHE_DIR, 'fg_globals.json');
-const MAX_ENTRIES = 20000; // symbols × timeframes
+const MAX_ENTRIES = 50000; // symbols × timeframes
 const EXPIRE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /**

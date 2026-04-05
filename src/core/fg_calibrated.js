@@ -55,6 +55,17 @@ function loadThresholds() {
 // ─── Asset class detection ──────────────────────────────────────────────────
 
 const CRYPTO_MAJORS = new Set(['BTC','ETH','SOL','XRP','BNB','DOGE','ADA','USDT','USDC']);
+let _usStockSet = null;
+
+const largeCap = new Set(['AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','BRK-B','AVGO','LLY',
+  'JPM','V','UNH','XOM','MA','COST','HD','PG','JNJ','ABBV','WMT','NFLX','BAC','CRM','ORCL',
+  'CVX','MRK','KO','PEP','AMD','TMO','CSCO','ADBE','ACN','ABT','MCD','IBM','DHR','QCOM',
+  'INTU','ISRG','GE','VZ','TXN','BKNG','PFE','RTX','AMGN','LMT','NOW','AMAT','GS','BLK',
+  'CAT','HON','LOW','DE','BA','DIS','CI','BMY','SO','DUK','NEE','WFC','SCHW','CME','MCO']);
+
+const etfs = new Set(['SPY','QQQ','DIA','IWM','VOO','VTI','ARKK','GDX','GDXJ','SIL','URA','LIT','PICK',
+  'GLD','SLV','USO','UNG','TLT','SHY','IEF','AGG','HYG','LQD','TQQQ','SQQQ','UPRO','BITO','MSTR',
+  'XLK','XLV','XLF','XLE','XLI','XLU','XLP','XLY','XLB','XLRE','XLC','EWA','EWJ','FXI','EWZ','SOXX']);
 
 /**
  * Determine the asset class for a symbol.
@@ -97,22 +108,32 @@ export function detectAssetClass(symbol) {
     'PENDLE','ETHFI','STRK','ZK','ZRO','EIGEN','GRASS','ONDO','LTC','SHIB','MATIC']);
   if (cryptoTokens.has(base)) return 'CRYPTO_MID';
 
-  // Dynamic: check CoinGecko universe (10,000 tokens)
+  // Dynamic: check CoinGecko universe — but only if NOT a known stock/ETF
+  // CoinGecko has symbols like COIN, AI, NET that collide with stock tickers
   const cgSet = getCryptoSet();
-  if (cgSet.has(base) && !s.endsWith('.AX') && !s.endsWith('.L') && !s.endsWith('.TO')) return 'CRYPTO_MID';
+  if (cgSet.has(base) && !s.endsWith('.AX') && !s.endsWith('.L') && !s.endsWith('.TO') && base.length <= 6) {
+    // Check against known stocks + ETFs first — stocks win over crypto
+    if (!largeCap.has(s) && !etfs.has(s)) {
+      // Also skip if it looks like a US stock ticker (1-4 uppercase letters that's also on NASDAQ/NYSE)
+      // Heuristic: if the symbol is in our US stock universe file, treat as stock
+      if (!_usStockSet) {
+        _usStockSet = new Set();
+        try {
+          const f = join(homedir(), '.tradingview-mcp', 'universes', 'us_stocks.json');
+          if (existsSync(f)) {
+            const stocks = JSON.parse(readFileSync(f, 'utf8'));
+            for (const st of stocks) if (st.symbol) _usStockSet.add(st.symbol.toUpperCase());
+          }
+        } catch {}
+      }
+      if (!_usStockSet.has(s)) return 'CRYPTO_MID';
+    }
+  }
 
   // ETFs
-  const etfs = new Set(['SPY','QQQ','DIA','IWM','VOO','VTI','ARKK','GDX','GDXJ','SIL','URA','LIT','PICK',
-    'GLD','SLV','USO','UNG','TLT','SHY','IEF','AGG','HYG','LQD','TQQQ','SQQQ','UPRO','BITO','MSTR',
-    'XLK','XLV','XLF','XLE','XLI','XLU','XLP','XLY','XLB','XLRE','XLC','EWA','EWJ','FXI','EWZ','SOXX']);
   if (etfs.has(s)) return 'ETFS';
 
-  // US stocks — check if likely large cap (we can't know market cap without data)
-  const largeCap = new Set(['AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','BRK-B','AVGO','LLY',
-    'JPM','V','UNH','XOM','MA','COST','HD','PG','JNJ','ABBV','WMT','NFLX','BAC','CRM','ORCL',
-    'CVX','MRK','KO','PEP','AMD','TMO','CSCO','ADBE','ACN','ABT','MCD','IBM','DHR','QCOM',
-    'INTU','ISRG','GE','VZ','TXN','BKNG','PFE','RTX','AMGN','LMT','NOW','AMAT','GS','BLK',
-    'CAT','HON','LOW','DE','BA','DIS','CI','BMY','SO','DUK','NEE','WFC','SCHW','CME','MCO']);
+  // US stocks — check if likely large cap
   if (largeCap.has(s)) return 'US_LARGE_CAP';
 
   return 'US_MID_SMALL';
