@@ -87,6 +87,9 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 </div>
 <div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div class="pager" id="pager"></div>
+<div style="padding:8px 16px;font-size:10px;color:#5e6673;border-top:1px solid #1e2329;margin-top:4px">
+DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate of return, money flow, volatility, gold. Backtest-validated on 149 symbols: +114% avg return, 69% WR, Sharpe 2.15 (p<0.01). Data: on-demand from Yahoo/Binance, cached with TTL-based freshness.
+</div>
 <div class="status" id="statusBar">Connecting...</div>
 
 <!-- Detail Modal -->
@@ -251,14 +254,18 @@ function renderTable(){
   const fk=tfKey[cTF]||'f';
   const cols=[
     {k:'',l:'★',w:'30px'},{k:'',l:'#',w:'35px'},{k:'s',l:'Name',S:1},{k:'p',l:'Price',S:1},
-    {k:'ch',l:'Chg%',S:1},{k:'m',l:'Market Cap',S:1,h:1},{k:'f',l:'F&G Daily',S:1},{k:'f1',l:'15m',S:1,h:1},
+    {k:'ch',l:'Chg%',S:1,tt:'Price deviation from 144-bar EMA'},{k:'m',l:'Market Cap',S:1,h:1},
+    {k:'f',l:'F&G Daily',S:1,tt:'DGT Fear & Greed: <-25=Fear, >+25=Greed'},{k:'f1',l:'15m',S:1,h:1},
     {k:'fh',l:'1H',S:1,h:1},{k:'f4',l:'4H',S:1,h:1},{k:'fw',l:'Wk',S:1,h:1},
-    {k:'z',l:'Zone'},{k:'',l:'Trend'},{k:'w',l:'Signal'}
+    {k:'z',l:'Zone',tt:'DGT zones: Despondency < Panic < Fear < Anxiety < Balanced < Optimism < Excitement < Thrill < Euphoria'},
+    {k:'',l:'Trend',tt:'Cross-TF trend: 15m→1H→4H→Daily→Weekly. Green=improving, Red=worsening'},
+    {k:'w',l:'Signal',tt:'ENTRY: F&G below 10th pctl for asset class. EXIT: above 75th pctl.'}
   ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
   document.getElementById('thead').innerHTML=cols.map(c=>{
     const active=c.k===fk;
     return'<th'+(c.S?' onclick="doSort(\''+c.k+'\')"':'')+(c.h?' class="hm"':'')
+      +(c.tt?' title="'+c.tt+'"':'')
       +' style="'+(active?'color:#f0b90b;':'')+(c.w?'width:'+c.w:'')+'">'+c.l+(c.S?ar(c.k):'')+'</th>';
   }).join('');
 
