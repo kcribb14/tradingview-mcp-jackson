@@ -742,22 +742,41 @@ async function openDM(sym,cat){
   if(row?.br)cards+='<div class="dc-row"><span>Buy Ratio</span><span>'+row.br+'%</span></div>';
   cards+='</div>';
 
-  // Card B: Geology (ASX mining only)
+  // Card B: Geology + Drill Result Reactions (ASX mining)
   if(row?.gs>0||sym.endsWith('.AX')){
     let geo=null;
     try{const gr=await fetch('/api/geology/'+encodeURIComponent(sym));geo=await gr.json();if(geo.error)geo=null}catch{}
     if(geo&&geo.total_holes>0){
-      cards+='<div class="dm-card"><div class="dc-title">🔬 Geology</div>';
+      cards+='<div class="dm-card" style="grid-column:span 2"><div class="dc-title">🔬 Geology & Drill Results</div>';
+      cards+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+      // Left: stats
+      cards+='<div>';
       cards+='<div class="dc-row"><span>GeoScore</span><span style="color:#f0b90b;font-weight:700">'+geo.geological_score+' ('+geo.geological_percentile+')</span></div>';
       cards+='<div class="dc-row"><span>Drillholes</span><span>'+geo.total_holes.toLocaleString()+'</span></div>';
       cards+='<div class="dc-row"><span>Commodity</span><span>'+geo.primary_commodity+'</span></div>';
-      cards+='<div class="dc-row"><span>Avg Depth</span><span>'+geo.avg_depth_m+'m</span></div>';
       if(geo.stranded_assets?.estimated_newly_economic>0){
-        cards+='<div class="dc-row"><span>Stranded Assets</span><span style="color:#0ecb81">'+geo.stranded_assets.estimated_newly_economic.toLocaleString()+' intercepts</span></div>';
-        cards+='<div class="dc-row"><span>Price Uplift</span><span>+'+geo.stranded_assets.value_uplift_pct+'%</span></div>';
+        cards+='<div class="dc-row"><span>Stranded</span><span style="color:#0ecb81">'+geo.stranded_assets.estimated_newly_economic.toLocaleString()+' newly economic</span></div>';
+        cards+='<div class="dc-row"><span>Drilled at</span><span>$'+geo.stranded_assets.historical_price+'/oz → $'+geo.stranded_assets.current_price+'/oz</span></div>';
       }
-      if(geo.projects?.length>0)cards+='<div class="dc-row"><span>Projects</span><span style="color:#5e6673">'+geo.projects.slice(0,3).join(', ')+'</span></div>';
+      if(geo.projects?.length>0)cards+='<div class="dc-row"><span>Projects</span><span style="color:#5e6673;font-size:10px">'+geo.projects.slice(0,4).join(', ')+'</span></div>';
       cards+='</div>';
+      // Right: latest drill reports with reactions
+      cards+='<div>';
+      if(geo.reports?.length>0){
+        for(const rep of geo.reports.slice(0,3)){
+          const rx=rep.reaction||{};
+          const statusCol={'CONTRARIAN_BUY':'#0ecb81','UNREACTED':'#ff9800','PARTIAL':'#848e9c','FULLY_PRICED':'#5e6673'}[rx.status]||'#848e9c';
+          const statusLabel={'CONTRARIAN_BUY':'🎯 CONTRARIAN BUY','UNREACTED':'⚠️ UNREACTED','PARTIAL':'↗ Partial','FULLY_PRICED':'✅ Priced In','NO_DATA':'—'}[rx.status]||'—';
+          cards+='<div style="margin-bottom:6px;padding:4px 6px;background:#181a2080;border-radius:4px;border-left:3px solid '+statusCol+'">';
+          cards+='<div style="font-size:10px;font-weight:600;color:#eaecef">'+rep.title+'</div>';
+          cards+='<div style="font-size:9px;color:#848e9c">'+rep.best+' | '+rep.quality+(rep.extension?' | Extension':'')+'</div>';
+          if(rx.d30!=null){
+            cards+='<div style="font-size:9px"><span style="color:'+statusCol+'">'+statusLabel+'</span> &nbsp; 30d: '+(rx.d30>0?'+':'')+rx.d30+'% (expected: +'+rx.expected+'%)</div>';
+          }
+          cards+='</div>';
+        }
+      }else{cards+='<div style="color:#5e6673;font-size:10px">No recent drill reports</div>'}
+      cards+='</div></div></div>';
     }
   }
 
@@ -1216,6 +1235,27 @@ async function loadSignals(){
     }
 
     // ─── Watching ───
+    // Unreacted Drill Results — highest alpha
+    try{
+      const ur=await fetch('/api/unreacted');const urd=await ur.json();
+      if(urd.unreacted?.length>0){
+        html+='<div class="sig-section"><div class="sig-title" style="color:#ff9800">⚠️ UNREACTED DRILL RESULTS — Market missed these ('+urd.count+')</div>';
+        for(const u of urd.unreacted.slice(0,5)){
+          const rx=u.report.reaction;
+          const statusCol=rx.status==='CONTRARIAN_BUY'?'#0ecb81':'#ff9800';
+          const statusLabel=rx.status==='CONTRARIAN_BUY'?'🎯 CONTRARIAN BUY':'⚠️ UNREACTED';
+          html+='<div class="sig-card" style="border-color:'+statusCol+'44;background:'+statusCol+'08" onclick="openDM(\''+u.ticker+'\')">';
+          html+='<div class="sc-hdr"><span class="sc-sym">'+u.ticker+'</span><span style="color:'+statusCol+';font-weight:700">'+statusLabel+'</span></div>';
+          html+='<div style="font-size:12px;font-weight:600;color:#eaecef;margin:4px 0">'+u.report.title+'</div>';
+          html+='<div style="font-size:11px;color:#eaecef">Best: <b>'+u.report.best+'</b> | '+u.report.quality+(u.report.extension?' | Extension':'')+'</div>';
+          html+='<div style="font-size:11px;margin-top:4px">30d reaction: <b style="color:'+(rx.d30>0?'#0ecb81':'#f6465d')+'">'+(rx.d30>0?'+':'')+rx.d30+'%</b> (expected: <b>+'+rx.expected+'%</b>)</div>';
+          html+='<div style="font-size:10px;color:#848e9c;margin-top:2px">F&G: '+(u.fg!=null?u.fg:'—')+' | GeoScore: '+u.geoScore+' '+u.geoPctl+' | Price: $'+(u.currentPrice>=1?u.currentPrice?.toFixed(2):u.currentPrice?.toExponential(2)||'—')+'</div>';
+          html+='</div>';
+        }
+        html+='</div>';
+      }
+    }catch{}
+
     if(watching.length>0){
       html+='<div class="sig-section"><div class="sig-title">APPROACHING FEAR ('+(d.signals?.watching||0)+' total, top 15)</div>';
       html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th></tr>';

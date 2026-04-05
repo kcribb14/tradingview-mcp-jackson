@@ -559,6 +559,35 @@ app.get('/api/geology/:symbol', (req, res) => {
   res.json(geo);
 });
 
+// Unreacted drill results — highest alpha signals
+app.get('/api/unreacted', (req, res) => {
+  const results = [];
+  for (const [ticker, data] of Object.entries(CANETOAD)) {
+    if (!data.reports) continue;
+    for (const report of data.reports) {
+      if (!report.reaction?.status) continue;
+      if (report.reaction.status === 'UNREACTED' || report.reaction.status === 'CONTRARIAN_BUY') {
+        const row = DATA.rows.find(r => r.s === ticker);
+        results.push({
+          ticker, fg: row?.f ?? null, signal: row?.w ?? '', score: row?.sq ?? 0, grade: row?.sg ?? 'D',
+          geoScore: data.geological_score, geoPctl: data.geological_percentile,
+          report: { title: report.title, date: report.date, best: report.best, gxw: report.gxw,
+            quality: report.quality, extension: report.extension,
+            reaction: report.reaction, priceAtReport: report.priceAtReport },
+          currentPrice: row?.p ?? null,
+        });
+      }
+    }
+  }
+  results.sort((a, b) => {
+    // Contrarian buys first, then by quality
+    const aScore = (a.report.reaction.status === 'CONTRARIAN_BUY' ? 100 : 50) + (a.geoScore || 0);
+    const bScore = (b.report.reaction.status === 'CONTRARIAN_BUY' ? 100 : 50) + (b.geoScore || 0);
+    return bScore - aScore;
+  });
+  res.json({ unreacted: results, count: results.length });
+});
+
 // Worker status endpoint
 app.get('/api/worker-status', (req, res) => {
   res.json(workerStatus);
