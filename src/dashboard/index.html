@@ -96,6 +96,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
       <h2><span id="dmSym">—</span><span class="fg z3" id="dmFG">—</span><span class="star" id="dmStar" onclick="toggleFavDM()">☆</span></h2>
       <div style="display:flex;gap:6px;align-items:center">
         <span id="dmPrice" style="font-size:12px;color:#848e9c">—</span>
+        <div id="dmTFButtons" style="display:flex;gap:3px"></div>
         <button class="btn" onclick="openInTV()" style="font-size:10px;padding:3px 8px">Open in TV</button>
         <button class="dm-close" onclick="closeDM()">✕</button>
       </div>
@@ -344,22 +345,129 @@ function mapTV(sym,cat){
   return sym;
 }
 
+// ─── Modal with synced TF between TradingView widget and F&G chart ─────────
+let dmCat='',dmTF='D',dmAvailTFs={};
+const TV_INTERVALS={'15':'15','60':'60','240':'240','D':'D','W':'W'};
+const TF_LABELS={'15':'15m','60':'1H','240':'4H','D':'Daily','W':'Weekly'};
+
+// DGT zone bands plugin for the F&G chart
+const dgtZoneBands={id:'dgtZoneBands',beforeDraw(chart){
+  const {ctx,chartArea:{left,right},scales:{fg:yScale}}=chart;
+  if(!yScale)return;
+  const zones=[
+    {lo:-60,hi:-41,c:'rgba(145,0,0,0.15)'},{lo:-41,hi:-25,c:'rgba(255,82,82,0.12)'},
+    {lo:-25,hi:-10,c:'rgba(255,152,0,0.08)'},{lo:-10,hi:-5,c:'rgba(200,184,106,0.06)'},
+    {lo:-5,hi:5,c:'rgba(161,159,143,0.06)'},{lo:5,hi:10,c:'rgba(101,160,149,0.06)'},
+    {lo:10,hi:41,c:'rgba(80,176,80,0.08)'},{lo:41,hi:73,c:'rgba(46,143,46,0.12)'},
+    {lo:73,hi:100,c:'rgba(0,100,0,0.15)'}
+  ];
+  for(const z of zones){
+    const y1=yScale.getPixelForValue(z.hi),y2=yScale.getPixelForValue(z.lo);
+    ctx.fillStyle=z.c;ctx.fillRect(left,y1,right-left,y2-y1);
+  }
+}};
+
+function updateTVWidget(sym,interval){
+  const tvSym=mapTV(sym,dmCat);const container=document.getElementById('tvContainer');container.innerHTML='';
+  if(tvSym&&typeof TradingView!=='undefined'){
+    try{new TradingView.widget({container_id:'tvContainer',symbol:tvSym,interval:interval,theme:'dark',style:'1',locale:'en',toolbar_bg:'#181a20',enable_publishing:false,allow_symbol_change:false,hide_side_toolbar:false,width:'100%',height:'100%',backgroundColor:'#181a20'})}
+    catch{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Widget unavailable</div>'}
+  }else{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Chart unavailable for DEX token</div>'}
+}
+
+function renderTFButtons(){
+  const el=document.getElementById('dmTFButtons');
+  el.innerHTML=['15','60','240','D','W'].map(tf=>{
+    const active=tf===dmTF;
+    const avail=dmAvailTFs[tf];
+    return'<button class="btn" style="font-size:10px;padding:2px 6px;min-width:32px;'
+      +(active?'background:#f0b90b;color:#0b0e11;':'')
+      +(!avail&&!active?'opacity:0.35;cursor:default;':'')
+      +'" onclick="switchTF(\''+tf+'\')"'
+      +(!avail&&!active?' title="No data"':'')
+      +'>'+TF_LABELS[tf]+'</button>';
+  }).join('');
+}
+
+async function switchTF(tf){
+  dmTF=tf;renderTFButtons();
+  updateTVWidget(dmSym,TV_INTERVALS[tf]||'D');
+  await loadFGChart(dmSym,tf);
+}
+
+async function loadFGChart(sym,tf){
+  const canvas=document.getElementById('dmFGChart');
+  try{
+    const r=await fetch('/api/history/'+encodeURIComponent(sym)+'?tf='+tf);
+    const d=await r.json();
+    if(d.current){
+      const pr=d.current.price;
+      document.getElementById('dmPrice').textContent=pr>=1?'$'+pr.toFixed(2):pr>0.001?'$'+pr.toFixed(4):pr>0?'$'+pr.toExponential(2):'—';
+      if(d.current.fg!=null){const fc=fgCls(d.current.fg);document.getElementById('dmFG').className='fg '+fc;document.getElementById('dmFG').textContent=(d.current.fg>0?'+':'')+d.current.fg.toFixed(1)}
+    }
+    if(dmFGChart)dmFGChart.destroy();
+    if(!d.fg||d.fg.length===0){
+      // No F&G data — show price-only fallback
+      if(d.ohlcv?.length>0){
+        const labels=d.ohlcv.map(b=>fmtTime(b.t,tf)),prices=d.ohlcv.map(b=>b.c);
+        dmFGChart=new Chart(canvas,{type:'line',data:{labels,datasets:[{label:'Price',data:prices,borderColor:'#eaecef',borderWidth:1.5,pointRadius:0,yAxisID:'price',tension:0.1}]},
+          options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:false}},
+          scales:{x:{grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:9}}},price:{position:'left',grid:{color:'#1e232920'},ticks:{color:'#848e9c',font:{size:9}}}}}});
+      }
+      return;
+    }
+    // Dual-axis: Price (left) + F&G (right) with DGT zone bands
+    const fv=d.fg.map(x=>x.v);
+    const labels=d.fg.map(x=>fmtTime(x.t,tf));
+    const pv=d.ohlcv?.map(b=>b.c)||[];
+    const ds=[];
+    if(pv.length===fv.length){
+      ds.push({label:'Price',data:pv,borderColor:'#eaecef',borderWidth:1.5,pointRadius:0,yAxisID:'price',tension:0.1,order:2});
+    }
+    ds.push({label:'F&G',data:fv,borderWidth:2,pointRadius:0,yAxisID:'fg',tension:0.1,order:1,
+      segment:{borderColor:ctx=>{const v2=ctx.p1?.parsed?.y??0;
+        if(v2<-41)return'#910000';if(v2<-25)return'#ff5252';if(v2<-10)return'#ff9800';
+        if(v2<-5)return'#c8b86a';if(v2<5)return'#A19F8F';if(v2<10)return'#65a095';
+        if(v2<41)return'#50b050';if(v2<73)return'#2e8f2e';return'#006400';}}});
+    dmFGChart=new Chart(canvas,{type:'line',data:{labels,datasets:ds},
+      plugins:[dgtZoneBands],
+      options:{responsive:true,maintainAspectRatio:false,
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},datalabels:{display:false},
+          tooltip:{callbacks:{label:ctx=>{
+            if(ctx.dataset.label==='Price')return'Price: $'+(ctx.raw>=1?ctx.raw.toFixed(2):ctx.raw.toFixed(6));
+            const v=ctx.raw;const zn=v<-41?'Despondency':v<-25?'Panic':v<-10?'Fear':v<-5?'Anxiety':v<5?'Balanced':v<10?'Optimism':v<41?'Excitement':v<73?'Thrill':'Euphoria';
+            return'F&G: '+(v>0?'+':'')+v.toFixed(1)+' ('+zn+')';
+          }}}},
+        scales:{
+          x:{grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:9}}},
+          price:{type:'linear',position:'left',grid:{display:false},ticks:{color:'#848e9c',font:{size:9}},
+            title:{display:true,text:'Price',color:'#848e9c',font:{size:9}}},
+          fg:{type:'linear',position:'right',min:-60,max:100,
+            grid:{color:'rgba(30,35,41,0.2)'},ticks:{color:'#848e9c',font:{size:9}},
+            title:{display:true,text:'F&G',color:'#848e9c',font:{size:9}}}
+        }}});
+  }catch(e){console.error('FG chart error:',e)}
+}
+
+function fmtTime(ts,tf){
+  const d=new Date(ts);
+  if(tf==='W'||tf==='D')return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+
 async function openDM(sym,cat){
-  dmSym=sym;document.getElementById('dmBg').classList.add('open');
+  dmSym=sym;dmCat=cat||'';dmTF='D';
+  document.getElementById('dmBg').classList.add('open');
   document.getElementById('dmSym').textContent=sym;document.getElementById('dmPrice').textContent='...';
   document.getElementById('dmStar').className='star '+(FAVS.includes(sym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(sym)?'★':'☆';
-  const tvSym=mapTV(sym,cat);const container=document.getElementById('tvContainer');container.innerHTML='';
-  if(tvSym&&typeof TradingView!=='undefined'){try{new TradingView.widget({container_id:'tvContainer',symbol:tvSym,interval:'D',theme:'dark',style:'1',locale:'en',toolbar_bg:'#181a20',enable_publishing:false,allow_symbol_change:true,width:'100%',height:'100%',backgroundColor:'#181a20'})}catch{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Widget unavailable</div>'}}else{container.innerHTML='<div style="padding:20px;color:#848e9c;text-align:center">Chart unavailable for DEX token</div>'}
-  try{const r=await fetch('/api/history/'+encodeURIComponent(sym));const d=await r.json();
-    if(d.current){document.getElementById('dmPrice').textContent=d.current.price>=1?'$'+d.current.price.toFixed(2):'$'+d.current.price.toFixed(6);
-      const fc=fgCls(d.current.fg);document.getElementById('dmFG').className='fg '+fc;document.getElementById('dmFG').textContent=(d.current.fg>0?'+':'')+d.current.fg.toFixed(1)}
-    if(d.fg?.length>0){if(dmFGChart)dmFGChart.destroy();
-      const fv=d.fg.map(x=>x.v),fl=d.fg.map(x=>new Date(x.t).toLocaleDateString()),pv=d.ohlcv?.map(b=>b.c)||[];
-      const ds=[{data:fv,yAxisID:'y',segment:{borderColor:ctx=>{const v2=ctx.p1?.parsed?.y??0;return fgColor(v2)}},borderWidth:2,pointRadius:0,fill:false}];
-      if(pv.length===fv.length)ds.push({data:pv,yAxisID:'y1',borderColor:'rgba(240,185,11,.3)',borderWidth:1,pointRadius:0,fill:false});
-      dmFGChart=new Chart(document.getElementById('dmFGChart'),{type:'line',data:{labels:fl,datasets:ds},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},datalabels:{display:false},tooltip:{callbacks:{label:ctx=>ctx.datasetIndex===0?'F&G: '+ctx.raw.toFixed(1):'$'+ctx.raw.toFixed(2)}}},scales:{x:{display:true,grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:6,font:{size:9}}},y:{position:'right',grid:{color:'#1e232930'},ticks:{color:'#848e9c',font:{size:9}}},y1:{position:'left',grid:{display:false},ticks:{color:'#f0b90b40',font:{size:9}}}}}})}}catch{}
+  // Check available timeframes
+  try{const r=await fetch('/api/available-tfs/'+encodeURIComponent(sym));dmAvailTFs=(await r.json()).available||{}}catch{dmAvailTFs={D:true}}
+  renderTFButtons();
+  updateTVWidget(sym,'D');
+  await loadFGChart(sym,'D');
 }
-function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML=''}
+function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML='';if(dmFGChart){dmFGChart.destroy();dmFGChart=null}}
 function toggleFavDM(){if(!dmSym)return;toggleFav(dmSym);document.getElementById('dmStar').className='star '+(FAVS.includes(dmSym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(dmSym)?'★':'☆'}
 async function openInTV(){if(dmSym)fetch('/api/open-in-tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:dmSym})})}
 async function addToken(){const v=document.getElementById('addInput').value.trim();if(!v)return;document.getElementById('addInput').value='Adding...';try{const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})});const d=await r.json();document.getElementById('addInput').value='';if(d.token)alert('Added: '+d.token.symbol);else alert(d.error||'Failed');refresh()}catch(e){document.getElementById('addInput').value=v;alert(e.message)}}

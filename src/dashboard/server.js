@@ -250,16 +250,88 @@ app.get('/api/health', (req, res) => {
 app.get('/api/history/:symbol', async (req, res) => {
   try {
     const sym = req.params.symbol;
+    const tf = req.query.tf || 'D'; // D, 60, 240, 15, W
     const { computeTimeSeries } = await import('../core/fg_backtest.js');
-    const { fetchOhlcv } = await import('../core/unified_data.js');
-    const data = await fetchOhlcv(sym, 200);
-    if (!data || data.bars.length < 50) return res.json({ error: 'No data for ' + sym });
-    const series = computeTimeSeries(data.bars);
-    const ohlcv = data.bars.slice(-series.length).map(b => ({ t: b.time * 1000, c: Math.round(b.close * 1e6) / 1e6 }));
-    const fg = series.map(s => ({ t: new Date(s.date).getTime(), v: Math.round(s.fg_score * 10) / 10 }));
+
+    // Determine fetch function and params based on timeframe
+    const yahooRanges = { '15': { range: '5d', interval: '15m' }, '60': { range: '1mo', interval: '1h' }, '240': { range: '6mo', interval: '1d' }, 'D': { range: '2y', interval: '1d' }, 'W': { range: '10y', interval: '1wk' } };
+    const binanceIntervals = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
+
+    const { detectAssetClass } = await import('../core/fg_calibrated.js');
+    const cls = detectAssetClass(sym);
+    const isCrypto = cls.includes('CRYPTO');
+
+    let bars = null;
+
+    if (isCrypto) {
+      // Try Binance first for crypto
+      try {
+        let pair = sym.replace(/[-\/]/g, '').toUpperCase();
+        if (!pair.endsWith('USDT') && !pair.endsWith('USD')) pair += 'USDT';
+        const bi = binanceIntervals[tf] || '1d';
+        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=200`, { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const d = await r.json();
+          if (Array.isArray(d) && d.length >= 20) {
+            bars = d.map(b => ({ time: Math.floor(b[0] / 1000), open: +b[1], high: +b[2], low: +b[3], close: +b[4], volume: +b[5] || 0 }));
+          }
+        }
+      } catch {}
+    }
+
+    if (!bars) {
+      // Yahoo Finance for stocks + fallback
+      try {
+        const cfg = yahooRanges[tf] || yahooRanges['D'];
+        let ticker = sym;
+        if (isCrypto && !ticker.includes('-')) ticker = ticker + '-USD';
+        const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${cfg.range}&interval=${cfg.interval}&includePrePost=false`, { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const d = await r.json();
+          const chart = d?.chart?.result?.[0];
+          if (chart?.timestamp) {
+            const q = chart.indicators.quote[0];
+            bars = [];
+            for (let i = 0; i < chart.timestamp.length; i++) {
+              if (q.close[i] != null && q.open[i] != null) {
+                bars.push({ time: chart.timestamp[i], open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i], volume: q.volume[i] || 0 });
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!bars || bars.length < 30) return res.json({ error: 'No ' + tf + ' data for ' + sym, tf });
+
+    const series = computeTimeSeries(bars);
+    if (series.length === 0 && bars.length >= 30) {
+      // computeTimeSeries needs 150 bars — for short series, do inline calc
+      const ohlcv = bars.map(b => ({ t: b.time * 1000, o: Math.round(b.open * 1e4) / 1e4, h: Math.round(b.high * 1e4) / 1e4, l: Math.round(b.low * 1e4) / 1e4, c: Math.round(b.close * 1e4) / 1e4 }));
+      return res.json({ symbol: sym, tf, bars: ohlcv.length, ohlcv, fg: [], current: { price: bars[bars.length - 1].close } });
+    }
+
+    const slicedBars = bars.slice(-series.length);
+    const ohlcv = slicedBars.map(b => ({ t: b.time * 1000, o: Math.round(b.open * 1e4) / 1e4, h: Math.round(b.high * 1e4) / 1e4, l: Math.round(b.low * 1e4) / 1e4, c: Math.round(b.close * 1e4) / 1e4 }));
+    const fg = series.map(s => ({ t: new Date(s.date).getTime(), v: Math.max(-80, Math.min(100, Math.round(s.fg_score * 10) / 10)) }));
     const last = series[series.length - 1];
-    res.json({ symbol: sym, bars: ohlcv.length, ohlcv, fg, current: { fg: last?.fg_score, zone: last?.zone, price: ohlcv[ohlcv.length - 1]?.c } });
+    res.json({ symbol: sym, tf, bars: ohlcv.length, ohlcv, fg, current: { fg: last?.fg_score, zone: last?.zone, price: ohlcv[ohlcv.length - 1]?.c } });
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
+});
+
+// Available timeframes for a symbol (check which TFs have cached data)
+app.get('/api/available-tfs/:symbol', (req, res) => {
+  const sym = req.params.symbol;
+  const tfs = ['15', '60', '240', 'D', 'W'];
+  const cache = loadCache();
+  const available = {};
+  for (const tf of tfs) {
+    const key = `${sym}:${tf}`;
+    available[tf] = cache[key]?.fgScore != null;
+  }
+  // Daily is always "available" via live fetch
+  available['D'] = true;
+  res.json({ symbol: sym, available });
 });
 
 // ─── Watchlist ──────────────────────────────────────────────────────────────
