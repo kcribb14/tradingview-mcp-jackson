@@ -145,8 +145,9 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
   <button class="btn" onclick="applyPreset('entry')">Entry Zones</button>
   <button class="btn" onclick="applyPreset('greed')">Greed</button>
-  <button class="btn" onclick="applyPreset('whale')" title="High volume during fear = institutional accumulation">🐋 Whale Vol</button>
-  <button class="btn" onclick="applyPreset('smart')" title="Multi-factor score combining F&G depth, volume, RSI, momentum">🎯 Smart 60+</button>
+  <button class="btn" onclick="applyPreset('whale')" title="High volume during fear = institutional accumulation">🐋 Whale</button>
+  <button class="btn" onclick="applyPreset('smart')" title="Multi-factor score 60+ combining F&G, volume, RSI, momentum">🎯 Smart</button>
+  <button class="btn" onclick="applyPreset('smartmoney')" title="Fear + large avg trade size + buying pressure = Nansen-style smart money">🧠 Acc</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view -->
@@ -482,6 +483,7 @@ function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null,whale:null,s
   if(p==='greed')filters.fg_min=25;
   if(p==='whale')filters.whale='ACC';
   if(p==='smart')filters.smartMin=60;
+  if(p==='smartmoney'){filters.whale='ACC';filters.fg_max=-10} // Fear + accumulation = smart money
   renderTable()}
 async function refresh(){await loadPage(curPage);loadScatter()}
 async function toggleFav(s,ev){ev?.stopPropagation();if(FAVS.includes(s)){FAVS=FAVS.filter(x=>x!==s);fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}else{FAVS.push(s);fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}renderTable();renderCatBar()}
@@ -692,6 +694,20 @@ async function openDM(sym,cat){
         ocEl.innerHTML=items.join('');
       }
     }catch{}
+  }
+  // For DEX tokens or any symbol, show smart money data from the row
+  const row=D.symbols?.find(r=>r.s===sym);
+  if(row){
+    const smartItems=[];
+    if(row.wh==='ACC')smartItems.push('<span style="color:#0ecb81;font-weight:600">🧠 Smart Money Accumulation</span>');
+    if(row.wh==='DIST')smartItems.push('<span style="color:#f6465d;font-weight:600">🔴 Distribution</span>');
+    if(row.ats>0)smartItems.push('<span>Avg Trade: <b>$'+row.ats.toLocaleString()+'</b>'+(row.ats>10000?' (whale)':row.ats>1000?' (mid)':' (retail)')+'</span>');
+    if(row.br)smartItems.push('<span>Buy Ratio: <b style="color:'+(row.br>55?'#0ecb81':row.br<45?'#f6465d':'#848e9c')+'">'+row.br+'%</b></span>');
+    if(row.sq)smartItems.push('<span>Signal: <b style="color:'+(row.sg==='A'?'#0ecb81':row.sg==='B'?'#f0b90b':'#848e9c')+'">'+(row.sq||0)+'/100 Grade '+(row.sg||'?')+'</b></span>');
+    if(smartItems.length>0){
+      ocEl.style.display='flex';
+      ocEl.innerHTML=(ocEl.innerHTML?ocEl.innerHTML+' | ':'')+smartItems.join(' ');
+    }
   }
 }
 function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML='';if(dmFGChart){dmFGChart.destroy();dmFGChart=null}}

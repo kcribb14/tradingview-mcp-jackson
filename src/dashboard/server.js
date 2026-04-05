@@ -124,6 +124,21 @@ function rebuildData() {
       last.spark = [last.f1, last.fh, last.f4, last.f, last.fw].filter(v => v != null);
     }
 
+    // Merge DEX smart money data into existing rows (tokens that exist in both CEX and DEX)
+    const dexLookup = new Map();
+    for (const token of loadDexTokens()) {
+      if (token.avgTradeSize || token.buyRatio) dexLookup.set(token.symbol, token);
+    }
+    for (const r of rows) {
+      const dex = dexLookup.get(r.s);
+      if (dex) {
+        r.ats = dex.avgTradeSize || 0;
+        r.br = Math.round((dex.buyRatio || 0.5) * 100);
+        // Upgrade whale signal using DEX data
+        if (!r.wh && r.f < -10 && ((dex.avgTradeSize || 0) > 5000 || (dex.buyRatio || 0.5) > 0.6)) r.wh = 'ACC';
+      }
+    }
+
     // Add DEX tokens (clamp scores to safe range)
     const seenSyms = new Set(rows.map(r => r.s));
     const dexTokens = loadDexTokens().filter(t => !seenSyms.has(t.symbol));
@@ -142,10 +157,18 @@ function rebuildData() {
       const chainLabel = chain.charAt(0).toUpperCase() + chain.slice(1);
       const cat = chainCounts[chain] >= 20 ? 'DEX ' + chainLabel : 'DEX Other';
       const dexCh = token.priceChange?.h24 != null ? Math.round(token.priceChange.h24 * 100) / 100 : null;
+      // Smart money proxy from DEX data
+      const avgTs = token.avgTradeSize || 0;
+      const buyR = token.buyRatio || 0.5;
+      const totalTxns = (token.buys24h || 0) + (token.sells24h || 0);
+      let dexSmart = '';
+      if (fg < -10 && (avgTs > 5000 || buyR > 0.6) && totalTxns > 20) dexSmart = 'ACC'; // Fear + large trades/buying = accumulation
+      else if (fg > 10 && (avgTs > 5000 || buyR < 0.4) && totalTxns > 20) dexSmart = 'DIST'; // Greed + selling = distribution
       rows.push({
         s: token.symbol, f: fg, z: token.zone || 'Balanced',
         c: cat, t: 3, w: '', p: token.price || 0, m: token.mcap || 1e6,
         r: null, ch: dexCh, f1: null, fh: null, f4: null, fw: null, spark: [],
+        wh: dexSmart, ats: avgTs, br: Math.round(buyR * 100), // avg trade size, buy ratio %
       });
     }
 
