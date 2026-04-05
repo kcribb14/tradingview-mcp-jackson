@@ -83,7 +83,28 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 .sig-topbar .tb-pill .tb-val{font-size:16px;font-weight:700;display:block}
 .sig-table{width:100%;border-collapse:collapse;font-size:12px}.sig-table th{text-align:left;color:#848e9c;padding:4px 8px;border-bottom:1px solid #2b2f36}
 .sig-table td{padding:4px 8px;border-bottom:1px solid #1e2329}
-@media(max-width:768px){.sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36}.sidebar .card{min-width:160px}.chart-box{height:300px}.hm{display:none}}
+@media(max-width:768px){
+  .hdr{flex-direction:column;padding:8px 12px;gap:4px}
+  .hdr h1{font-size:15px}
+  #navTabs{gap:2px}#navTabs .btn{font-size:11px;padding:4px 8px;min-height:36px}
+  .hdr-r{display:none}
+  .sidebar{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid #2b2f36;padding:6px}
+  .sidebar .card{min-width:140px;padding:8px}
+  .chart-box{height:220px}
+  .hm{display:none}
+  .tf-bar{padding:4px 8px;gap:2px}.tf-btn{padding:8px 12px;font-size:12px;min-height:40px;min-width:50px}
+  .cat-bar{padding:4px 8px;overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}
+  .filters{padding:4px 12px;flex-wrap:wrap}.filters input{width:100%}
+  table{font-size:11px}table th,table td{padding:4px 6px}
+  .sig-card{padding:10px}.sig-card .sc-sym{font-size:14px}
+  .sig-briefing{padding:10px;font-size:12px}
+  .sig-topbar{gap:4px}.sig-topbar .tb-pill{padding:4px 8px;font-size:10px}.sig-topbar .tb-pill .tb-val{font-size:14px}
+  .dm{width:100%;height:100%;border-radius:0}.dm-top{height:45%}.dm-bot{height:55%}
+  .dm-h{padding:8px 12px;flex-wrap:wrap}
+  .dm-close{font-size:24px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
+  .wg-cell{min-width:0}.wg-chart{height:160px}
+  #wgGrid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -963,6 +984,30 @@ async function loadSignals(){
       });
       html+='</table></div>';
     }
+
+    // Load forward performance
+    try{
+      const pr=await fetch('/api/performance');const perf=await pr.json();
+      if(perf.totalSignals>0){
+        html+='<div class="sig-section"><div class="sig-title">FORWARD TRACKING (live since '+(perf.started?.slice(0,10)||'?')+')</div>';
+        html+='<div class="sig-topbar">';
+        html+='<div class="tb-pill"><span class="tb-val">'+perf.totalSignals+'</span>Tracked</div>';
+        html+='<div class="tb-pill"><span class="tb-val">'+perf.openSignals+'</span>Open</div>';
+        html+='<div class="tb-pill"><span class="tb-val">'+perf.closedSignals+'</span>Closed</div>';
+        if(perf.winRate!=null)html+='<div class="tb-pill"><span class="tb-val" style="color:'+(perf.winRate>=50?'#0ecb81':'#f6465d')+'">'+perf.winRate+'%</span>Win Rate</div>';
+        if(perf.avgReturn!=null)html+='<div class="tb-pill"><span class="tb-val" style="color:'+(perf.avgReturn>=0?'#0ecb81':'#f6465d')+'">'+(perf.avgReturn>0?'+':'')+perf.avgReturn+'%</span>Avg Return</div>';
+        html+='</div>';
+        if(perf.recentSignals?.length>0){
+          html+='<table class="sig-table"><tr><th>Symbol</th><th>Grade</th><th>Entry</th><th>Current</th><th>P&L</th><th>Days</th><th>Status</th></tr>';
+          perf.recentSignals.slice(0,10).forEach(s=>{
+            const pnlCol=(s.pnl||0)>0?'#0ecb81':(s.pnl||0)<0?'#f6465d':'#848e9c';
+            html+='<tr><td style="font-weight:600">'+s.symbol+'</td><td>'+(s.grade||'?')+'</td><td>$'+(s.entryPrice>=1?s.entryPrice.toFixed(2):s.entryPrice?.toExponential(2)||'?')+'</td><td>$'+(s.currentPrice>=1?s.currentPrice?.toFixed(2):s.currentPrice?.toExponential(2)||'?')+'</td><td style="color:'+pnlCol+';font-weight:600">'+(s.pnl!=null?(s.pnl>0?'+':'')+s.pnl+'%':'—')+'</td><td>'+(s.daysHeld||0)+'d</td><td style="font-size:10px">'+(s.status||'?')+'</td></tr>';
+          });
+          html+='</table>';
+        }
+        html+='</div>';
+      }
+    }catch{}
 
     el.innerHTML=html;
     document.getElementById('navSignals').textContent='Signals ('+entry.length+')';

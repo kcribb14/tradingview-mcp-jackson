@@ -776,10 +776,132 @@ async function checkNewSignals() {
   previousGradeA = new Set(gradeA);
 }
 
+// ─── Forward Tracker — auto-log all entry signals ───────────────────────────
+
+const TRACKING_FILE = join(HOME, '.tradingview-mcp', 'tracking', 'auto_signals.json');
+
+function loadTracking() {
+  try { return JSON.parse(readFileSync(TRACKING_FILE, 'utf8')); }
+  catch { return { signals: [], started: new Date().toISOString() }; }
+}
+
+function saveTracking(data) {
+  const dir = join(HOME, '.tradingview-mcp', 'tracking');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(TRACKING_FILE, JSON.stringify(data, null, 2));
+}
+
+let previousEntrySet = new Set();
+
+function autoTrackSignals() {
+  const tracking = loadTracking();
+  const currentEntries = DATA.rows.filter(r => r.w === 'ENTRY ZONE');
+  const currentSet = new Set(currentEntries.map(r => r.s));
+
+  // Log NEW entry zone signals
+  for (const r of currentEntries) {
+    if (previousEntrySet.has(r.s)) continue; // Already tracked
+    if (tracking.signals.find(s => s.symbol === r.s && s.status === 'OPEN')) continue; // Already open
+    tracking.signals.push({
+      symbol: r.s, logDate: new Date().toISOString(), entryPrice: r.p,
+      fg: r.f, grade: r.sg || 'D', score: r.sq || 0, category: r.c, status: 'OPEN',
+    });
+  }
+
+  // Update open signals with current price and check exits
+  for (const sig of tracking.signals) {
+    if (sig.status !== 'OPEN') continue;
+    const row = DATA.rows.find(r => r.s === sig.symbol);
+    if (!row) continue;
+    sig.currentPrice = row.p;
+    sig.currentFG = row.f;
+    sig.pnl = sig.entryPrice > 0 ? Math.round((row.p - sig.entryPrice) / sig.entryPrice * 10000) / 100 : 0;
+    sig.daysHeld = Math.floor((Date.now() - new Date(sig.logDate).getTime()) / 86400000);
+    // Auto-close conditions
+    if (row.w === 'TAKE PROFIT' || row.w === 'EXIT ZONE') {
+      sig.status = 'EXIT_SIGNAL'; sig.exitDate = new Date().toISOString(); sig.exitPrice = row.p;
+    } else if (sig.daysHeld >= 60) {
+      sig.status = 'MAX_HOLD'; sig.exitDate = new Date().toISOString(); sig.exitPrice = row.p;
+    }
+  }
+
+  saveTracking(tracking);
+  previousEntrySet = currentSet;
+}
+
+// Performance endpoint
+app.get('/api/performance', (req, res) => {
+  const tracking = loadTracking();
+  const open = tracking.signals.filter(s => s.status === 'OPEN');
+  const closed = tracking.signals.filter(s => s.status !== 'OPEN');
+  const wins = closed.filter(s => s.pnl > 0);
+  const allPnl = closed.map(s => s.pnl).filter(v => v != null);
+  const gradeA = tracking.signals.filter(s => s.grade === 'A');
+  const gradeAClosed = gradeA.filter(s => s.status !== 'OPEN');
+  const gradeAWins = gradeAClosed.filter(s => s.pnl > 0);
+
+  res.json({
+    started: tracking.started,
+    totalSignals: tracking.signals.length,
+    openSignals: open.length,
+    closedSignals: closed.length,
+    winRate: closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null,
+    avgReturn: allPnl.length > 0 ? Math.round(allPnl.reduce((a, b) => a + b, 0) / allPnl.length * 100) / 100 : null,
+    bestTrade: closed.length > 0 ? closed.reduce((b, s) => (s.pnl || 0) > (b.pnl || 0) ? s : b, closed[0]) : null,
+    worstTrade: closed.length > 0 ? closed.reduce((w, s) => (s.pnl || 0) < (w.pnl || 0) ? s : w, closed[0]) : null,
+    gradeA: { total: gradeA.length, closed: gradeAClosed.length, winRate: gradeAClosed.length > 0 ? Math.round(gradeAWins.length / gradeAClosed.length * 100) : null },
+    recentSignals: tracking.signals.slice(-20).reverse(),
+  });
+});
+
+// ─── Daily Report Auto-Generation ───────────────────────────────────────────
+
+let lastReportDate = '';
+function generateDailyReport() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today === lastReportDate) return;
+  lastReportDate = today;
+
+  const tracking = loadTracking();
+  const open = tracking.signals.filter(s => s.status === 'OPEN');
+  const closed = tracking.signals.filter(s => s.status !== 'OPEN');
+  const gradeA = DATA.rows.filter(r => r.sg === 'A');
+  const gradeB = DATA.rows.filter(r => r.sg === 'B');
+
+  const report = `# Daily F&G Report — ${today}\n\n` +
+    `## Market Status\n` +
+    `- Symbols: ${DATA.stats.total}\n` +
+    `- Avg F&G: ${DATA.stats.avgFG}\n` +
+    `- Entry Zones: ${DATA.rows.filter(r => r.w === 'ENTRY ZONE').length}\n` +
+    `- Breadth: ${JSON.stringify(DATA.stats.breadth)}\n\n` +
+    `## Signals\n` +
+    `- Grade A: ${gradeA.length}\n` +
+    `- Grade B: ${gradeB.length}\n\n` +
+    `## Forward Performance\n` +
+    `- Tracking since: ${tracking.started}\n` +
+    `- Open: ${open.length} | Closed: ${closed.length}\n` +
+    (closed.length > 0 ? `- Win Rate: ${Math.round(closed.filter(s => s.pnl > 0).length / closed.length * 100)}%\n` : '') +
+    `\n## Grade A Signals\n` +
+    gradeA.slice(0, 10).map(s => `- ${s.s}: F&G ${s.f}, Score ${s.sq}`).join('\n') + '\n';
+
+  const dir = join(HOME, 'tradingview-mcp-jackson', 'reports', 'daily');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, today + '.md'), report);
+  console.log('Daily report saved:', today);
+}
+
 // ─── Start ──────────────────────────────────────────────────────────────────
 
 rebuildData();
-setInterval(() => { rebuildData(); checkNewSignals(); }, 300000); // Refresh + check every 5 minutes
+// Run initial tracking on boot
+setTimeout(() => { autoTrackSignals(); generateDailyReport(); }, 5000);
+
+setInterval(() => {
+  rebuildData();
+  checkNewSignals();
+  autoTrackSignals();
+  generateDailyReport();
+}, 300000); // Every 5 minutes
 
 // Get local network IP for phone access
 import { networkInterfaces } from 'os';
