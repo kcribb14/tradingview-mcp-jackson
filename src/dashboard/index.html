@@ -266,9 +266,11 @@ async function loadScatter(){
 
 function render(){
   const s=D.stats;
-  const tfCount = cTF==='Daily' ? (s.total||0) : (D.tfCounts?.[cTF]||0);
+  const totalSyms = s.total||0;
+  const tfDataCount = cTF==='Daily' ? totalSyms : (D.tfCounts?.[cTF]||0);
+  const tfPct = totalSyms>0 ? Math.round(tfDataCount/totalSyms*100) : 0;
   document.getElementById('meta').textContent=
-    tfCount.toLocaleString()+' symbols · '+cTF+' · '+(D.updated?new Date(D.updated).toLocaleTimeString():'');
+    totalSyms.toLocaleString()+' symbols · '+cTF+(cTF!=='Daily'?' ('+tfDataCount.toLocaleString()+' with data, '+tfPct+'%)':'')+' · '+(D.updated?new Date(D.updated).toLocaleTimeString():'');
   renderSidebar();renderTFBar();renderCatBar();renderTable();
   document.getElementById('statusBar').textContent=
     'Connected | '+(s.total||0)+' symbols | Updated: '+(D.updated?new Date(D.updated).toLocaleTimeString():'never');

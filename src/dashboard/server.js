@@ -286,9 +286,12 @@ app.get('/api/cached', (req, res) => {
     let filtered = DATA.rows;
     if (category) filtered = filtered.filter(r => r.c === category || r.c.includes(category));
 
-    // Sort
+    // Sort — nulls always go to bottom regardless of sort direction
     filtered = [...filtered].sort((a, b) => {
-      const va = a[sort] ?? 0, vb = b[sort] ?? 0;
+      const va = a[sort], vb = b[sort];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;  // nulls to bottom
+      if (vb == null) return -1;
       return typeof va === 'string' ? va.localeCompare(vb) * order : (va - vb) * order;
     });
 
