@@ -177,13 +177,32 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 </div>
 <!-- Watchlist Grid view -->
 <div id="viewWatchgrid" class="tab-hidden" style="padding:12px">
-  <div style="display:flex;gap:4px;margin-bottom:10px;justify-content:center" id="wgTFBar">
-    <button class="btn active" onclick="switchWgTF('D')">Daily</button>
-    <button class="btn" onclick="switchWgTF('60')">1H</button>
-    <button class="btn" onclick="switchWgTF('240')">4H</button>
-    <button class="btn" onclick="switchWgTF('15')">15m</button>
-    <button class="btn" onclick="switchWgTF('W')">Weekly</button>
+  <div style="display:flex;gap:4px;margin-bottom:8px;justify-content:center;flex-wrap:wrap">
+    <div id="wgTFBar" style="display:flex;gap:4px">
+      <button class="btn active" onclick="switchWgTF('D')">Daily</button>
+      <button class="btn" onclick="switchWgTF('60')">1H</button>
+      <button class="btn" onclick="switchWgTF('240')">4H</button>
+      <button class="btn" onclick="switchWgTF('15')">15m</button>
+      <button class="btn" onclick="switchWgTF('W')">Weekly</button>
+    </div>
+    <span style="color:#2b2f36;margin:0 4px">|</span>
+    <div style="display:flex;gap:4px">
+      <button class="btn" onclick="switchWgView('grid')" id="wgViewGrid">Individual</button>
+      <button class="btn active" onclick="switchWgView('overlay')" id="wgViewOverlay">F&G Overlay</button>
+      <button class="btn" onclick="switchWgView('price')" id="wgViewPrice">Price %</button>
+    </div>
+    <span style="color:#2b2f36;margin:0 4px">|</span>
+    <div style="display:flex;gap:3px">
+      <button class="btn" onclick="setWgRange(7)" style="font-size:10px;padding:3px 6px">1W</button>
+      <button class="btn" onclick="setWgRange(30)" style="font-size:10px;padding:3px 6px">1M</button>
+      <button class="btn active" onclick="setWgRange(90)" style="font-size:10px;padding:3px 6px" id="wgRange90">3M</button>
+      <button class="btn" onclick="setWgRange(180)" style="font-size:10px;padding:3px 6px">6M</button>
+      <button class="btn" onclick="setWgRange(365)" style="font-size:10px;padding:3px 6px">1Y</button>
+      <button class="btn" onclick="setWgRange(0)" style="font-size:10px;padding:3px 6px">ALL</button>
+    </div>
   </div>
+  <div id="wgInsights" style="font-size:11px;color:#848e9c;padding:4px 8px;margin-bottom:8px;background:#181a20;border-radius:6px;display:none"></div>
+  <div id="wgOverlayContainer" style="position:relative;height:450px;background:#181a20;border:1px solid #2b2f36;border-radius:8px;margin-bottom:12px;display:none"><canvas id="wgOverlayChart"></canvas></div>
   <div id="wgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:10px"></div>
   <div id="wgEmpty" style="text-align:center;padding:40px;color:#848e9c;display:none">No watchlist symbols. Star ★ symbols from the Scanner to add them here.</div>
 </div>
@@ -1236,25 +1255,161 @@ function switchView(view){
   if(view==='trending')loadTrending();
 }
 
-// ─── Watchlist Grid ─────────────────────────────────────────────────────────
-let wgTF='D';const wgCharts={};
+// ─── Watchlist Grid + Overlay ────────────────────────────────────────────────
+let wgTF='D';const wgCharts={};let wgView='overlay';let wgOverlayChart=null;let wgRange=90;let wgDataCache={};
+const WG_COLORS=['#f7931a','#627eea','#00ffa3','#a2aaad','#ffffff','#cc0000','#76b900','#ffd700','#ff6600','#e91e63','#00bcd4','#9c27b0'];
+
+function switchWgView(view){
+  wgView=view;
+  document.getElementById('wgViewGrid').classList.toggle('active',view==='grid');
+  document.getElementById('wgViewOverlay').classList.toggle('active',view==='overlay');
+  document.getElementById('wgViewPrice').classList.toggle('active',view==='price');
+  document.getElementById('wgGrid').style.display=view==='grid'?'grid':'none';
+  document.getElementById('wgOverlayContainer').style.display=view!=='grid'?'block':'none';
+  if(view!=='grid')renderWgOverlay();
+  else loadWatchlistGrid();
+}
+
+function setWgRange(days){
+  wgRange=days;
+  document.querySelectorAll('#viewWatchgrid .btn[onclick*=setWgRange]').forEach(b=>b.classList.remove('active'));
+  if(days>0){const btn=document.querySelector('#viewWatchgrid .btn[onclick*="setWgRange('+days+')"]');if(btn)btn.classList.add('active')}
+  renderWgOverlay();
+}
+
+async function renderWgOverlay(){
+  if(!FAVS||FAVS.length===0)return;
+  const container=document.getElementById('wgOverlayContainer');
+  container.style.display='block';
+  document.getElementById('wgGrid').style.display='none';
+
+  // Fetch data for all watchlist symbols (use cache)
+  const allData={};
+  await Promise.all(FAVS.map(async sym=>{
+    const key=sym+'_'+wgTF;
+    if(wgDataCache[key]){allData[sym]=wgDataCache[key];return}
+    try{
+      const r=await fetch('/api/history/'+encodeURIComponent(sym)+'?tf='+wgTF);
+      const d=await r.json();
+      if(d.fg?.length>0){wgDataCache[key]=d;allData[sym]=d}
+    }catch{}
+  }));
+
+  if(wgOverlayChart){wgOverlayChart.destroy();wgOverlayChart=null}
+  const cv=document.getElementById('wgOverlayChart');
+  const isPrice=wgView==='price';
+
+  // Find common date range
+  const allDates=new Set();
+  for(const d of Object.values(allData)){
+    const items=isPrice?d.ohlcv:d.fg;
+    items?.forEach(p=>allDates.add(p.t));
+  }
+  let dates=[...allDates].sort();
+
+  // Apply date range filter
+  if(wgRange>0){
+    const cutoff=Date.now()-wgRange*86400000;
+    dates=dates.filter(t=>t>=cutoff);
+  }
+  if(dates.length===0)return;
+
+  const labels=dates.map(t=>fmtTime(t,wgTF));
+  const datasets=[];
+
+  FAVS.forEach((sym,i)=>{
+    const d=allData[sym];if(!d)return;
+    const items=isPrice?d.ohlcv:d.fg;if(!items?.length)return;
+    const color=WG_COLORS[i%WG_COLORS.length];
+
+    // Map values to the common date axis
+    const valMap=new Map();
+    items.forEach(p=>{
+      const val=isPrice?p.c:p.v;
+      valMap.set(p.t,val);
+    });
+
+    let data;
+    if(isPrice){
+      // Normalize to % change from first visible value
+      const firstVal=dates.map(t=>valMap.get(t)).find(v=>v!=null);
+      data=dates.map(t=>{const v=valMap.get(t);return v!=null&&firstVal?Math.round((v/firstVal-1)*10000)/100:null});
+    }else{
+      data=dates.map(t=>valMap.get(t)??null);
+    }
+
+    datasets.push({
+      label:sym,data,borderColor:color,borderWidth:2,pointRadius:0,tension:0.2,
+      spanGaps:true,
+      ...(isPrice?{}:{segment:{borderColor:ctx=>{const v=ctx.p1?.parsed?.y;if(v==null)return color;return v<-25?'#ff5252':v<-10?'#ff9800':v<5?color:v<25?'#50b050':'#006400'}}})
+    });
+  });
+
+  const yConfig=isPrice?{
+    grid:{color:'#1e232930'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v+'%'},
+    title:{display:true,text:'% Change',color:'#5e6673',font:{size:10}}
+  }:{
+    min:-60,max:100,grid:{color:'#1e232930'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},
+    title:{display:true,text:'F&G Score',color:'#5e6673',font:{size:10}}
+  };
+
+  wgOverlayChart=new Chart(cv,{type:'line',data:{labels,datasets},
+    plugins:isPrice?[]:[dgtZoneBands],
+    options:{responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:true,position:'top',labels:{color:'#eaecef',font:{size:10},usePointStyle:true,pointStyle:'line'}},
+        datalabels:{display:false},
+        tooltip:{callbacks:{label:ctx=>{const v=ctx.raw;if(v==null)return null;return ctx.dataset.label+': '+(isPrice?(v>0?'+':'')+v+'%':(v>0?'+':'')+v.toFixed(1))}}}},
+      scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:10,font:{size:9}}},y:yConfig}}});
+
+  // Insights
+  renderWgInsights(allData);
+}
+
+function renderWgInsights(allData){
+  const el=document.getElementById('wgInsights');
+  if(!FAVS||FAVS.length<2){el.style.display='none';return}
+  el.style.display='';
+  const items=[];
+
+  // Most/least fearful
+  const fgVals=FAVS.map(s=>{const row=D.symbols?.find(r=>r.s===s);return row?{s,f:row.f}:null}).filter(Boolean);
+  fgVals.sort((a,b)=>a.f-b.f);
+  if(fgVals.length>0){
+    items.push('Most fearful: <b style="color:#f6465d">'+fgVals[0].s+' ('+fgVals[0].f.toFixed(1)+')</b>');
+    items.push('Most greedy: <b style="color:#0ecb81">'+fgVals[fgVals.length-1].s+' ('+fgVals[fgVals.length-1].f.toFixed(1)+')</b>');
+    const spread=Math.round((fgVals[fgVals.length-1].f-fgVals[0].f)*10)/10;
+    items.push('F&G spread: <b>'+spread+' pts</b>'+(spread>30?' (wide divergence)':' (similar sentiment)'));
+  }
+
+  // Entry zone alerts
+  const entries=fgVals.filter(v=>{const row=D.symbols?.find(r=>r.s===v.s);return row?.w==='ENTRY ZONE'});
+  if(entries.length>0)items.push('🟢 Entry zone: <b style="color:#0ecb81">'+entries.map(e=>e.s).join(', ')+'</b>');
+
+  el.innerHTML=items.join(' &nbsp;·&nbsp; ');
+}
 
 function switchWgTF(tf){
   wgTF=tf;
+  wgDataCache={}; // Clear cache on TF change
   document.querySelectorAll('#wgTFBar .btn').forEach(b=>{b.classList.toggle('active',b.textContent.includes({'D':'Daily','60':'1H','240':'4H','15':'15m','W':'Weekly'}[tf]))});
-  loadWatchlistGrid();
+  if(wgView==='grid')loadWatchlistGrid();else renderWgOverlay();
 }
 
 async function loadWatchlistGrid(){
+  // If overlay view active, render overlay instead
+  if(wgView!=='grid'){renderWgOverlay();return}
+
   const grid=document.getElementById('wgGrid');
   const empty=document.getElementById('wgEmpty');
+  document.getElementById('wgOverlayContainer').style.display='none';
   // Destroy existing charts
   Object.values(wgCharts).forEach(c=>c.destroy());
   for(const k in wgCharts)delete wgCharts[k];
   grid.innerHTML='';
 
   if(!FAVS||FAVS.length===0){empty.style.display='';grid.style.display='none';return}
-  empty.style.display='none';grid.style.display='';
+  empty.style.display='none';grid.style.display='grid';
 
   // Update nav badge
   const nav=document.getElementById('navWatchgrid');
