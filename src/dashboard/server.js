@@ -364,6 +364,7 @@ async function fetchBars(sym, tf) {
   const cls = detectAssetClass(sym);
   const isCrypto = cls.includes('CRYPTO');
 
+  let primaryBars = null;
   if (isCrypto) {
     try {
       let pair = sym.replace(/[-\/]/g, '').toUpperCase();
@@ -374,9 +375,11 @@ async function fetchBars(sym, tf) {
       if (r.ok) {
         const d = await r.json();
         if (Array.isArray(d) && d.length >= 20)
-          return d.map(b => ({ time: Math.floor(b[0] / 1000), open: +b[1], high: +b[2], low: +b[3], close: +b[4], volume: +b[5] || 0 }));
+          primaryBars = d.map(b => ({ time: Math.floor(b[0] / 1000), open: +b[1], high: +b[2], low: +b[3], close: +b[4], volume: +b[5] || 0 }));
       }
     } catch {}
+    // For non-daily, return Binance immediately
+    if (primaryBars && tf !== 'D') return primaryBars;
   }
   // Yahoo Finance — try max range first, fall back to shorter if sparse
   async function tryYahoo(ticker2, range2, interval2) {
@@ -407,22 +410,46 @@ async function fetchBars(sym, tf) {
     if (bars2.length >= 20) return bars2;
   } catch {}
 
-  // CoinGecko fallback for crypto daily (gives full history back to inception)
-  if (isCrypto && tf === 'D') {
+  // CryptoCompare for crypto daily — always try if Binance gave < 2000 bars
+  if (isCrypto && tf === 'D' && (!primaryBars || primaryBars.length < 2000)) {
+    try {
+      const ccSym = sym.replace(/-USD$/i, '').replace(/USDT$/i, '').toUpperCase();
+      const allBars = [];
+      let toTs = Math.floor(Date.now() / 1000);
+      for (let page = 0; page < 4; page++) { // 4 pages × 2000 = up to 8000 bars (22yr)
+        const ccr = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${ccSym}&tsym=USD&limit=2000&toTs=${toTs}`, { signal: AbortSignal.timeout(8000) });
+        if (!ccr.ok) break;
+        const ccd = await ccr.json();
+        const bars3 = (ccd?.Data?.Data || []).filter(b => b.close > 0);
+        if (bars3.length === 0) break;
+        allBars.unshift(...bars3.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volumeto || 0 })));
+        toTs = bars3[0].time - 1;
+        if (bars3.length < 2000) break;
+        await new Promise(r => setTimeout(r, 300));
+      }
+      // Deduplicate
+      const seen = new Set();
+      const deduped = allBars.filter(b => { if (seen.has(b.time)) return false; seen.add(b.time); return true; }).sort((a, b) => a.time - b.time);
+      if (deduped.length >= 100) return deduped;
+    } catch {}
+  }
+
+  // CoinGecko OHLC fallback (last resort for crypto)
+  if (isCrypto && tf === 'D' && (!primaryBars || primaryBars.length < 500)) {
     try {
       const cgId = cgIdMap.get(sym.toUpperCase());
       if (cgId) {
         const cgr = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/ohlc?vs_currency=usd&days=max`, { signal: AbortSignal.timeout(10000) });
         if (cgr.ok) {
           const cgd = await cgr.json();
-          if (Array.isArray(cgd) && cgd.length >= 50) {
-            const cgBars = cgd.map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open: o, high: h, low: l, close: c, volume: 0 }));
-            return cgBars;
-          }
+          if (Array.isArray(cgd) && cgd.length > (primaryBars?.length || 0))
+            primaryBars = cgd.map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open: o, high: h, low: l, close: c, volume: 0 }));
         }
       }
     } catch {}
   }
+  // Return whatever we got (primaryBars from Binance, or from fallbacks)
+  if (primaryBars && primaryBars.length >= 20) return primaryBars;
   return null;
 }
 
