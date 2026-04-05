@@ -12,6 +12,7 @@ import { dirname, join } from 'path';
 import { loadCache, saveCache as _saveCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
 import { loadDexTokens } from '../core/dex_universe.js';
+
 import { scoreSignal } from '../core/signal_scorer.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +20,16 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
+
+// Load CANETOAD geological signals (must be after HOME is defined)
+let CANETOAD = {};
+try {
+  const geoFile = join(HOME, '.tradingview-mcp', 'canetoad', 'signals.json');
+  if (existsSync(geoFile)) {
+    CANETOAD = JSON.parse(readFileSync(geoFile, 'utf8'));
+    console.log('CANETOAD loaded:', Object.keys(CANETOAD).length, 'tickers with geological data');
+  }
+} catch (e) { console.error('CANETOAD load error:', e.message); }
 
 app.use(compression());
 app.use(express.json());
@@ -109,6 +120,8 @@ function rebuildData() {
       const momentumBonus = (entry.components?.pmacd ?? 0) < -10 ? 20 : (entry.components?.pmacd ?? 0) < -5 ? 10 : 0;
       const smartScore = Math.min(100, fgDepth + volBonus + rsiBonus + momentumBonus);
 
+      // Geological data from CANETOAD
+      const geo = CANETOAD[sym] || null;
       rows.push({
         s: sym, f: clamp(fg), z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
         r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null, ch,
@@ -116,9 +129,11 @@ function rebuildData() {
         fh: clamp(cache[sym + ':60']?.fgScore),
         f4: clamp(cache[sym + ':240']?.fgScore),
         fw: clamp(cache[sym + ':W']?.fgScore),
-        wh: whale, // Whale signal: ACC/DIST/''
-        ad: athDist, // ATH distance proxy (144-bar return)
-        ss: smartScore, // Smart Score 0-100
+        wh: whale, ad: athDist, ss: smartScore,
+        gh: geo?.total_holes || null, // Total drillholes
+        gs: geo?.geological_score || null, // Geo score
+        gp: geo?.geological_percentile || null, // P99/P95/etc
+        gst: geo?.stranded_assets?.estimated_newly_economic || null, // Stranded intercepts
       });
       const last = rows[rows.length - 1];
       last.spark = [last.f1, last.fh, last.f4, last.f, last.fw].filter(v => v != null);
@@ -534,6 +549,14 @@ app.get('/api/discover', async (req, res) => {
     rebuildData();
     res.json(result);
   } catch (e) { res.json({ error: e.message }); }
+});
+
+// Geological data endpoint
+app.get('/api/geology/:symbol', (req, res) => {
+  const sym = req.params.symbol;
+  const geo = CANETOAD[sym];
+  if (!geo) return res.json({ error: 'No geological data for ' + sym });
+  res.json(geo);
 });
 
 // Worker status endpoint

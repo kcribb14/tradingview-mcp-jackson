@@ -148,6 +148,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('whale')" title="High volume during fear = institutional accumulation">🐋 Whale</button>
   <button class="btn" onclick="applyPreset('smart')" title="Multi-factor score 60+ combining F&G, volume, RSI, momentum">🎯 Smart</button>
   <button class="btn" onclick="applyPreset('smartmoney')" title="Fear + large avg trade size + buying pressure = Nansen-style smart money">🧠 Acc</button>
+  <button class="btn" onclick="applyPreset('geological')" title="ASX miners with high geological score + F&G fear = undervalued geology">🔬 Geo</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view -->
@@ -369,6 +370,7 @@ function renderTable(){
   if(filters.swing)rows=rows.filter(r=>r.w===filters.swing);
   if(filters.whale)rows=rows.filter(r=>r.wh===filters.whale);
   if(filters.smartMin!=null)rows=rows.filter(r=>(r.ss||0)>=filters.smartMin);
+  if(filters.geoMin!=null)rows=rows.filter(r=>(r.gs||0)>=filters.geoMin);
 
   const fk=tfKey[cTF]||'f';
   const cols=[
@@ -483,7 +485,8 @@ function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null,whale:null,s
   if(p==='greed')filters.fg_min=25;
   if(p==='whale')filters.whale='ACC';
   if(p==='smart')filters.smartMin=60;
-  if(p==='smartmoney'){filters.whale='ACC';filters.fg_max=-10} // Fear + accumulation = smart money
+  if(p==='smartmoney'){filters.whale='ACC';filters.fg_max=-10}
+  if(p==='geological')filters.geoMin=50; // Geo score 50+ = significant drilling data
   renderTable()}
 async function refresh(){await loadPage(curPage);loadScatter()}
 async function toggleFav(s,ev){ev?.stopPropagation();if(FAVS.includes(s)){FAVS=FAVS.filter(x=>x!==s);fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}else{FAVS.push(s);fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}renderTable();renderCatBar()}
@@ -708,6 +711,24 @@ async function openDM(sym,cat){
       ocEl.style.display='flex';
       ocEl.innerHTML=(ocEl.innerHTML?ocEl.innerHTML+' | ':'')+smartItems.join(' ');
     }
+  }
+  // Geological data for mining stocks
+  if(row?.gs>0||sym.endsWith('.AX')){
+    try{
+      const gr=await fetch('/api/geology/'+encodeURIComponent(sym));
+      const geo=await gr.json();
+      if(!geo.error&&geo.total_holes>0){
+        ocEl.style.display='flex';
+        const geoItems=[];
+        geoItems.push('<span>🔬 <b>'+geo.total_holes.toLocaleString()+'</b> drillholes</span>');
+        geoItems.push('<span>'+geo.primary_commodity+'</span>');
+        if(geo.geological_percentile)geoItems.push('<span style="color:#f0b90b;font-weight:600">'+geo.geological_percentile+'</span>');
+        if(geo.stranded_assets?.estimated_newly_economic>0)geoItems.push('<span style="color:#0ecb81">'+geo.stranded_assets.estimated_newly_economic.toLocaleString()+' newly economic</span>');
+        if(geo.stranded_assets?.value_uplift_pct>0)geoItems.push('<span>Price uplift: +'+geo.stranded_assets.value_uplift_pct+'%</span>');
+        if(geo.projects?.length>0)geoItems.push('<span style="color:#5e6673">'+geo.projects.slice(0,3).join(', ')+'</span>');
+        ocEl.innerHTML=(ocEl.innerHTML?ocEl.innerHTML+' | ':'')+geoItems.join(' ');
+      }
+    }catch{}
   }
 }
 function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML='';if(dmFGChart){dmFGChart.destroy();dmFGChart=null}}
