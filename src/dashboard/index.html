@@ -861,9 +861,83 @@ async function loadCycle(){
         data:[pct,100-pct],backgroundColor:[colors[0],'rgba(43,47,54,0.5)'],borderWidth:0,circumference:180,rotation:270
       }]},options:{responsive:false,maintainAspectRatio:false,cutout:'72%',plugins:{legend:{display:false},tooltip:{enabled:false},datalabels:{display:false}}}});
     }
-    drawGauge('gauge1',mfgNorm,[mfgCol]);
-    drawGauge('gauge2',asPct,[asCol]);
-    drawGauge('gauge3',riskPct,[raCol]);
+    // ─── MACRO CYCLE STAGE CLOCK ───
+    const ms=d.macroStage||{};
+    const stageNames=['','RECESSION','EARLY RECOVERY','EXPANSION','LATE EXPANSION','SLOWDOWN','CONTRACTION'];
+    const stageNum=Math.round(ms.stage||0);
+    const stageCol={'RECESSION':'#3b82f6','EARLY RECOVERY':'#22c55e','EXPANSION':'#0ecb81','LATE EXPANSION':'#f0b90b','SLOWDOWN':'#ff9800','CONTRACTION':'#f6465d','STAGFLATION':'#a855f7','SELECTIVE GROWTH':'#06b6d4'}[ms.name]||'#848e9c';
+
+    html+='<div style="background:#181a20;border:2px solid '+stageCol+'55;border-radius:10px;padding:16px;margin-bottom:16px">';
+    html+='<div style="text-align:center;margin-bottom:12px"><div style="font-size:10px;color:#848e9c;text-transform:uppercase;letter-spacing:.5px">MACRO BUSINESS CYCLE</div>';
+    html+='<div style="font-size:24px;font-weight:700;color:'+stageCol+';margin:4px 0">Stage '+stageNum+': '+ms.name+'</div>';
+    html+='<div style="font-size:12px;color:#eaecef">'+ms.desc+'</div>';
+    html+='<div style="font-size:13px;color:'+stageCol+';font-weight:600;margin-top:6px">'+ms.action+'</div></div>';
+
+    // Cycle clock: 6 segments in a row
+    html+='<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-bottom:12px">';
+    for(let i=1;i<=6;i++){
+      const active=stageNum===i;
+      const sn=stageNames[i];
+      const sc=i===stageNum?stageCol:'#2b2f36';
+      const patterns=[,['B↑','E↓','C↓'],['B↑','E↑','C↓'],['B↑','E↑','C↑'],['B↓','E↑','C↑'],['B↓','E↓','C↑'],['B↓','E↓','C↓']];
+      html+='<div style="background:'+(active?sc+'18':'#1e2329')+';border:2px solid '+(active?sc:sc+'33')+';border-radius:8px;padding:8px 10px;text-align:center;min-width:110px;flex:1">';
+      html+='<div style="font-size:9px;color:#5e6673">Stage '+i+'</div>';
+      html+='<div style="font-size:11px;font-weight:'+(active?'700':'400')+';color:'+(active?'#eaecef':'#5e6673')+'">'+sn+'</div>';
+      html+='<div style="font-size:9px;color:#5e6673;margin-top:2px">'+patterns[i].join(' ')+'</div>';
+      if(active)html+='<div style="width:8px;height:8px;border-radius:50%;background:'+sc+';margin:4px auto 0"></div>';
+      html+='</div>';
+    }
+    html+='</div>';
+
+    // Buy/Avoid
+    html+='<div style="display:flex;gap:12px;justify-content:center;font-size:12px;margin-bottom:8px">';
+    html+='<span>Buy: <b style="color:#0ecb81">'+(ms.buy||[]).join(', ')+'</b></span>';
+    html+='<span>Avoid: <b style="color:#f6465d">'+(ms.avoid||[]).join(', ')+'</b></span>';
+    html+='</div></div>';
+
+    // ─── BAROMETER BARS ───
+    html+='<div class="sig-section"><div class="sig-title">ASSET CLASS BAROMETERS</div>';
+    (d.barometers||[]).forEach(b=>{
+      const pct=Math.max(0,Math.min(100,Math.round(((b.fg??0)+50)/100*100)));
+      const col=b.bullish?'#0ecb81':'#f6465d';
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span style="width:90px;font-size:12px;font-weight:600">'+b.name+'</span>';
+      html+='<div style="flex:1;height:12px;background:#2b2f36;border-radius:6px;position:relative;overflow:hidden"><div style="position:absolute;left:50%;width:1px;height:100%;background:#5e6673"></div><div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#f6465d,#f0b90b,#0ecb81);border-radius:6px;opacity:0.6"></div><div style="position:absolute;left:'+pct+'%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:'+col+';border:2px solid #eaecef"></div></div>';
+      html+='<span style="width:50px;text-align:right;font-size:12px;font-weight:700;color:'+col+'">'+(b.fg!=null?(b.fg>0?'+':'')+b.fg:'—')+'</span>';
+      html+='<span style="width:70px;font-size:10px;color:'+col+'">'+(b.bullish?'BULLISH':'BEARISH')+'</span></div>';
+    });
+    html+='</div>';
+
+    // ─── CYCLE INDICATORS ───
+    html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:16px">';
+    (d.indicators||[]).forEach(ind=>{
+      const ic=ind.status.includes('BULL')||ind.status.includes('ON')||ind.status.includes('recovery')?'#0ecb81':ind.status.includes('BEAR')||ind.status.includes('OFF')||ind.status.includes('tight')?'#f6465d':'#f0b90b';
+      html+='<div style="background:#1e2329;border:1px solid #2b2f36;border-radius:6px;padding:10px"><div style="font-size:10px;color:#848e9c;text-transform:uppercase">'+ind.name+'</div><div style="font-size:18px;font-weight:700;color:'+ic+'">'+ind.value+'</div><div style="font-size:10px;color:'+ic+'">'+ind.status+'</div></div>';
+    });
+    html+='</div>';
+
+    // ─── FULL ASSET CLASS TABLE ───
+    html+='<div class="sig-section"><div class="sig-title">FULL ASSET CLASS COMPARISON</div>';
+    html+='<table class="sig-table"><tr><th>Asset</th><th>Symbol</th><th>F&G</th><th>Category</th><th>Cycle Signal</th></tr>';
+    (d.assetTable||[]).sort((a,b)=>(a.fg??0)-(b.fg??0)).forEach(a=>{
+      const bull=(a.fg??0)>0;const col=bull?'#0ecb81':'#f6465d';
+      const sig=(a.fg??0)>10?'BULLISH':(a.fg??0)>0?'Neutral +':(a.fg??0)>-10?'Neutral -':'BEARISH';
+      // Check if this asset class is in the "buy" list for current stage
+      const favored=(ms.buy||[]).some(b=>a.cat?.includes(b)||a.name?.includes(b));
+      html+='<tr style="'+(favored?'background:#0ecb8108':'')+';cursor:pointer" onclick="openDM(\''+( a.sym||'')+'\')">';
+      html+='<td style="font-weight:600">'+a.name+'</td><td style="color:#848e9c">'+(a.sym||'—')+'</td>';
+      html+='<td>'+fgBadge(a.fg)+'</td><td style="font-size:11px;color:#848e9c">'+a.cat+'</td>';
+      html+='<td style="font-size:11px;color:'+col+';font-weight:'+(favored?'700':'400')+'">'+(favored?'★ ':'')+sig+'</td></tr>';
+    });
+    html+='</table></div>';
+
+    el.innerHTML=html;
+
+    // Render gauges after HTML is in DOM
+    setTimeout(()=>{
+      drawGauge('gauge1',mfgNorm,[mfgCol]);
+      drawGauge('gauge2',asPct,[asCol]);
+      drawGauge('gauge3',riskPct,[raCol]);
+    },50);
 
   }catch(e){el.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
 }
@@ -976,8 +1050,9 @@ async function loadSignals(){
     // ─── Daily Briefing ───
     const now=new Date();
     const dateStr=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-    const phaseShort=cycle?.phase?.split('—')[0]?.trim()||'Unknown';
-    const phaseCol=phaseShort.includes('RISK OFF')?'#f6465d':phaseShort.includes('RISK ON')?'#0ecb81':'#f0b90b';
+    const ms=cycle?.macroStage||{};
+    const phaseShort=ms.name||cycle?.phase?.split('—')[0]?.trim()||'Unknown';
+    const phaseCol={'RECESSION':'#3b82f6','EARLY RECOVERY':'#22c55e','EXPANSION':'#0ecb81','LATE EXPANSION':'#f0b90b','SLOWDOWN':'#ff9800','CONTRACTION':'#f6465d'}[ms.name]||'#f0b90b';
     const topSig=gradeA[0]||gradeB[0];
     const topStr=topSig?topSig.s+' (Score '+topSig.sq+', '+(topSig.sf||[])[0]?.name+')':'None';
     const altStr=cycle?.altSeason?.label||'Unknown';
@@ -990,7 +1065,10 @@ async function loadSignals(){
     html+='<div class="phase" style="color:'+phaseCol+'">'+phaseShort+'</div>';
     html+='<div>'+gradeA.length+' Grade A signals'+(gradeA.length>0?', led by '+topStr:'')+'. ';
     html+=altStr+'. '+lagStr+'. ';
-    html+='Market breadth: '+(cycle?.breadth?Object.entries(cycle.breadth).map(([k,v])=>k+' '+v+'%').join(', '):'—')+' above EMA.</div>';
+    html+='Market breadth: '+(cycle?.breadth?Object.entries(cycle.breadth).map(([k,v])=>k+' '+v+'%').join(', '):'—')+' above EMA.';
+    if(ms.buy?.length)html+=' <b style="color:#0ecb81">Buy:</b> '+ms.buy.join(', ')+'.';
+    if(ms.avoid?.length)html+=' <b style="color:#f6465d">Avoid:</b> '+ms.avoid.join(', ')+'.';
+    html+='</div>';
     html+='</div>';
 
     // ─── Top Bar Pills ───

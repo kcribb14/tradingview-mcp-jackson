@@ -588,6 +588,75 @@ app.get('/api/cycle', (req, res) => {
     return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10 : null;
   };
 
+  // ─── 6-STAGE MACRO BUSINESS CYCLE ───
+  const bondsFG = avgFG(['TLT', 'IEF', 'SHY', 'AGG']);
+  const equitiesFG = avgFG(['SPY', 'QQQ', 'IWM', 'DIA']);
+  const commoditiesFG = avgFG(['GC=F', 'SI=F', 'CL=F', 'HG=F', 'PL=F']);
+  const cryptoFG = avgFG(['BTC', 'ETH']);
+  const realEstateFG = avgFG(['VNQ', 'IYR', 'XLRE']);
+  const dollarFG = r('UUP')?.f ?? null;
+
+  const B = (bondsFG ?? 0) > 0;
+  const E = (equitiesFG ?? 0) > 0;
+  const C = (commoditiesFG ?? 0) > 0;
+
+  let macroStage;
+  if (B && !E && !C) macroStage = { stage: 1, name: 'RECESSION', desc: 'Bonds rising, equities & commodities falling', action: 'Buy bonds, avoid risk assets', buy: ['Bonds', 'Gold', 'Cash'], avoid: ['Equities', 'Crypto', 'Real Estate'] };
+  else if (B && E && !C) macroStage = { stage: 2, name: 'EARLY RECOVERY', desc: 'Bonds & equities rising, commodities still weak', action: 'Buy equities NOW — best entry point', buy: ['Equities', 'Bonds', 'Real Estate'], avoid: ['Commodities'] };
+  else if (B && E && C) macroStage = { stage: 3, name: 'EXPANSION', desc: 'Everything rising — full risk-on', action: 'Full risk-on: equities, crypto, mining', buy: ['Equities', 'Crypto', 'Commodities', 'Mining'], avoid: ['Cash'] };
+  else if (!B && E && C) macroStage = { stage: 4, name: 'LATE EXPANSION', desc: 'Bonds falling, equities & commodities strong', action: 'Reduce bonds, hold equities, commodities peak', buy: ['Commodities', 'Equities'], avoid: ['Bonds'] };
+  else if (!B && !E && C) macroStage = { stage: 5, name: 'SLOWDOWN', desc: 'Only commodities still rising', action: 'Reduce equities, commodities peaking', buy: ['Gold', 'Commodities'], avoid: ['Equities', 'Crypto'] };
+  else if (!B && !E && !C) macroStage = { stage: 6, name: 'CONTRACTION', desc: 'Everything falling — maximum fear', action: 'Cash + gold only, wait for bonds to bottom', buy: ['Cash', 'Gold'], avoid: ['Everything else'] };
+  else if (B && !E && C) macroStage = { stage: 1.5, name: 'STAGFLATION', desc: 'Bonds & commodities up, equities down', action: 'Gold + inflation hedges', buy: ['Gold', 'Commodities'], avoid: ['Equities', 'Bonds long'] };
+  else macroStage = { stage: 3.5, name: 'SELECTIVE GROWTH', desc: 'Equities up without broad commodity support', action: 'Quality equities only', buy: ['Large Cap'], avoid: ['Small Cap', 'Commodities'] };
+
+  // Barometers
+  const barometers = [
+    { name: 'Bonds', fg: bondsFG, symbols: ['TLT','IEF','SHY','AGG'], bullish: B },
+    { name: 'Equities', fg: equitiesFG, symbols: ['SPY','QQQ','IWM'], bullish: E },
+    { name: 'Commodities', fg: commoditiesFG, symbols: ['GC=F','SI=F','CL=F','HG=F'], bullish: C },
+    { name: 'Crypto', fg: cryptoFG, symbols: ['BTC','ETH'], bullish: (cryptoFG ?? 0) > 0 },
+    { name: 'Real Estate', fg: realEstateFG, symbols: ['VNQ','IYR'], bullish: (realEstateFG ?? 0) > 0 },
+    { name: 'USD', fg: dollarFG, symbols: ['UUP'], bullish: (dollarFG ?? 0) > 0 },
+  ];
+
+  // Full asset class table
+  const assetTable = [
+    { name: 'US Govt Bonds', sym: 'TLT', fg: r('TLT')?.f, cat: 'Bonds' },
+    { name: 'Corp Bonds', sym: 'LQD', fg: r('LQD')?.f, cat: 'Bonds' },
+    { name: 'High Yield', sym: 'HYG', fg: r('HYG')?.f, cat: 'Bonds' },
+    { name: 'US Large Cap', sym: 'SPY', fg: r('SPY')?.f, cat: 'Equities' },
+    { name: 'US Small Cap', sym: 'IWM', fg: r('IWM')?.f, cat: 'Equities' },
+    { name: 'Europe', sym: 'VGK', fg: r('VGK')?.f, cat: 'Equities' },
+    { name: 'Emerging Mkts', sym: 'EEM', fg: r('EEM')?.f, cat: 'Equities' },
+    { name: 'China', sym: 'FXI', fg: r('FXI')?.f, cat: 'Equities' },
+    { name: 'Gold', sym: 'GC=F', fg: r('GC=F')?.f, cat: 'Commodities' },
+    { name: 'Silver', sym: 'SI=F', fg: r('SI=F')?.f, cat: 'Commodities' },
+    { name: 'Oil', sym: 'CL=F', fg: r('CL=F')?.f, cat: 'Commodities' },
+    { name: 'Copper', sym: 'HG=F', fg: r('HG=F')?.f, cat: 'Commodities' },
+    { name: 'Real Estate', sym: 'VNQ', fg: r('VNQ')?.f, cat: 'Real Estate' },
+    { name: 'US Dollar', sym: 'UUP', fg: r('UUP')?.f, cat: 'Currency' },
+    { name: 'Bitcoin', sym: 'BTC', fg: r('BTC')?.f, cat: 'Crypto' },
+    { name: 'Ethereum', sym: 'ETH', fg: r('ETH')?.f, cat: 'Crypto' },
+    { name: 'Altcoins', sym: null, fg: catAvg('Crypto Mid'), cat: 'Crypto' },
+    { name: 'ASX Mining', sym: null, fg: catAvg('ASX Mining Micro'), cat: 'Mining' },
+    { name: 'Lithium', sym: null, fg: avgFG(['ALB','SQM','PLS.AX']), cat: 'Mining' },
+    { name: 'Uranium', sym: null, fg: avgFG(['CCJ','UEC','PDN.AX']), cat: 'Mining' },
+  ];
+
+  // Cycle indicators
+  const emaAbove = ['SPY','QQQ','IWM','BTC','GC=F','TLT'].filter(s => (r(s)?.ch ?? 0) > 0).length;
+  const riskAppetite = Math.round(((equitiesFG??0)+(cryptoFG??0)-(bondsFG??0)-(r('GC=F')?.f??0))*10)/10;
+  const fgSpread = Math.round((Math.max(...barometers.map(b=>b.fg??-99)) - Math.min(...barometers.map(b=>b.fg??99)))*10)/10;
+  const yieldCurveProxy = Math.round(((r('TLT')?.f??0) - (r('SHY')?.f??0))*10)/10;
+
+  const indicators = [
+    { name: '200 EMA Cross', value: emaAbove+'/6 above', status: emaAbove>=4?'BULLISH':emaAbove>=3?'MIXED':'BEARISH' },
+    { name: 'F&G Spread', value: fgSpread+' pts', status: fgSpread>20?'WIDE (rotation)':'NARROW (systemic)' },
+    { name: 'Risk Appetite', value: (riskAppetite>0?'+':'')+riskAppetite, status: riskAppetite>10?'RISK ON':riskAppetite<-10?'RISK OFF':'CAUTIOUS' },
+    { name: 'Yield Curve', value: (yieldCurveProxy>0?'+':'')+yieldCurveProxy, status: yieldCurveProxy>0?'Steepening (recovery)':'Flattening (tightening)' },
+  ];
+
   const stages = [
     { id: 'safety', name: 'Safety', symbols: ['GC=F', 'SI=F', 'TLT', 'GLD', 'SLV'], fg: avgFG(['GC=F', 'SI=F', 'GLD', 'SLV']) },
     { id: 'commodities', name: 'Commodities', symbols: ['GC=F', 'SI=F', 'CL=F', 'HG=F', 'PL=F'], fg: avgFG(['GC=F', 'SI=F', 'CL=F', 'HG=F', 'PL=F']) },
@@ -648,7 +717,14 @@ app.get('/api/cycle', (req, res) => {
     { name: 'Uranium', syms: ['CCJ','UEC','PDN.AX','BOE.AX'], fg: avgFG(['CCJ','UEC','PDN.AX','BOE.AX']) },
   ];
 
-  res.json({ stages, phase, leadLag, altSeason: { pct: altSeasonPct, label: altSeason, btcFG, altsAbove: altsBeatBTC, altsTotal: altScores.length }, mining, breadth: DATA.stats.breadth });
+  res.json({
+    // Macro cycle
+    macroStage, barometers, assetTable, indicators,
+    // Existing
+    stages, phase, leadLag,
+    altSeason: { pct: altSeasonPct, label: altSeason, btcFG, altsAbove: altsBeatBTC, altsTotal: altScores.length },
+    mining, breadth: DATA.stats.breadth,
+  });
 });
 
 // Cycle history from saved snapshots
