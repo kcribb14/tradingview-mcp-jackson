@@ -234,6 +234,8 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
       <button class="btn active" onclick="setWgRange(90)" style="font-size:10px;padding:3px 6px" id="wgRange90">3M</button>
       <button class="btn" onclick="setWgRange(180)" style="font-size:10px;padding:3px 6px">6M</button>
       <button class="btn" onclick="setWgRange(365)" style="font-size:10px;padding:3px 6px">1Y</button>
+      <button class="btn" onclick="setWgRange(1825)" style="font-size:10px;padding:3px 6px">5Y</button>
+      <button class="btn" onclick="setWgRange(3650)" style="font-size:10px;padding:3px 6px">10Y</button>
       <button class="btn" onclick="setWgRange(0)" style="font-size:10px;padding:3px 6px">ALL</button>
     </div>
   </div>
@@ -549,7 +551,7 @@ function renderTable(){
 }
 
 // ─── Drag-Select on Scatter + Comparison Overlay ────────────────────────────
-let isDragging=false,dragStartX=0,dragStartY=0,cmpSymbols=[],cmpMode='both',cmpRangeDays=90;
+let isDragging=false,dragStartX=0,dragStartY=0,cmpSymbols=[],cmpMode='both',cmpRangeDays=90,cmpRenderMode='lines';
 let cmpPriceChart=null,cmpFGChart2=null;
 
 (function initDragSelect(){
@@ -596,11 +598,10 @@ let cmpPriceChart=null,cmpFGChart2=null;
       const fx=r.m,fy=r[fk]??r.f;
       return fx>=Math.min(x1,x2)&&fx<=Math.max(x1,x2)&&fy>=y1&&fy<=y2;
     });
-    if(dots.length>=2&&dots.length<=30){
+    if(dots.length>=2){
       cmpSymbols=dots.map(d=>d.s);
+      cmpRenderMode=dots.length<=30?'lines':'band';
       openCompare();
-    }else if(dots.length>30){
-      alert('Selected '+dots.length+' symbols — max 30. Zoom in or narrow the selection.');
     }
   });
 })();
@@ -620,8 +621,9 @@ function closeCompare(){document.getElementById('comparePanel').style.display='n
 
 async function openCompare(){
   document.getElementById('comparePanel').style.display='';
-  document.getElementById('compareTitleText').textContent='Comparing '+cmpSymbols.length+' symbols';
-  document.getElementById('cmpSymList').textContent=cmpSymbols.join(' · ');
+  const modeLabel=cmpRenderMode==='band'?cmpSymbols.length+' symbols (distribution band)':cmpSymbols.length+' symbols';
+  document.getElementById('compareTitleText').textContent='Comparing '+modeLabel;
+  document.getElementById('cmpSymList').textContent=cmpRenderMode==='band'?'Band view — top/bottom outliers labeled':cmpSymbols.slice(0,20).join(' · ')+(cmpSymbols.length>20?' +'+( cmpSymbols.length-20)+' more':'');
   setCmpMode(cmpMode);
   renderCompare();
 }
@@ -667,12 +669,49 @@ async function renderCompare(){
   if(cmpFGChart2){cmpFGChart2.destroy();cmpFGChart2=null}
   if(cmpMode!=='price'){
     const fDs=[];
-    cmpSymbols.forEach((sym,i)=>{
-      const d=allData[sym];if(!d?.fg)return;
-      const vMap=new Map();d.fg.forEach(p=>vMap.set(p.t,p.v));
-      const data=dates.map(t=>vMap.get(t)??null);
-      fDs.push({label:sym,data,borderColor:colors[i%colors.length],borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
-    });
+
+    if(cmpRenderMode==='band'&&cmpSymbols.length>30){
+      // BAND MODE: show percentile ribbon instead of individual lines
+      // Build value maps per symbol
+      const allMaps=[];
+      cmpSymbols.forEach(sym=>{
+        const d=allData[sym];if(!d?.fg)return;
+        const m=new Map();d.fg.forEach(p=>m.set(p.t,p.v));allMaps.push({sym,m});
+      });
+      // Calculate percentiles at each date
+      const p10=[],p25=[],med=[],p75=[],p90=[],avgLine=[];
+      dates.forEach(t=>{
+        const vals=allMaps.map(({m})=>m.get(t)).filter(v=>v!=null).sort((a,b)=>a-b);
+        const n=vals.length;
+        if(n<3){p10.push(null);p25.push(null);med.push(null);p75.push(null);p90.push(null);avgLine.push(null);return}
+        const pctl=p=>vals[Math.min(n-1,Math.floor(n*p/100))];
+        p10.push(pctl(10));p25.push(pctl(25));med.push(pctl(50));p75.push(pctl(75));p90.push(pctl(90));
+        avgLine.push(Math.round(vals.reduce((a,b)=>a+b,0)/n*10)/10);
+      });
+      // Outer band
+      fDs.push({data:p90,fill:'+1',backgroundColor:'rgba(14,203,129,0.06)',borderWidth:0,pointRadius:0,label:'90th pctl'});
+      fDs.push({data:p10,fill:false,borderWidth:0,pointRadius:0,label:'10th pctl'});
+      // Inner band
+      fDs.push({data:p75,fill:'+1',backgroundColor:'rgba(14,203,129,0.12)',borderWidth:0,pointRadius:0,label:'75th'});
+      fDs.push({data:p25,fill:false,borderWidth:0,pointRadius:0,label:'25th'});
+      // Median + average
+      fDs.push({data:med,borderColor:'#eaecef',borderWidth:2.5,pointRadius:0,label:'Median',tension:0.2});
+      fDs.push({data:avgLine,borderColor:'#f0b90b',borderWidth:1.5,borderDash:[5,3],pointRadius:0,label:'Average',tension:0.2});
+      // Outlier labels: bottom 3 and top 3 at current date
+      const lastIdx=dates.length-1;
+      const curVals=allMaps.map(({sym,m})=>({sym,v:m.get(dates[lastIdx])})).filter(x=>x.v!=null).sort((a,b)=>a.v-b.v);
+      const outlierStr=curVals.length>6?
+        'Bottom: '+curVals.slice(0,3).map(x=>x.sym+'('+x.v.toFixed(0)+')').join(', ')+' | Top: '+curVals.slice(-3).map(x=>x.sym+'('+x.v.toFixed(0)+')').join(', '):'';
+      document.getElementById('cmpSymList').textContent=cmpSymbols.length+' symbols band | '+outlierStr;
+    }else{
+      // LINES MODE: individual lines (original)
+      cmpSymbols.forEach((sym,i)=>{
+        const d=allData[sym];if(!d?.fg)return;
+        const vMap=new Map();d.fg.forEach(p=>vMap.set(p.t,p.v));
+        const data=dates.map(t=>vMap.get(t)??null);
+        fDs.push({label:sym,data,borderColor:colors[i%colors.length],borderWidth:1.5,pointRadius:0,tension:0.2,spanGaps:true});
+      });
+    }
     cmpFGChart2=new Chart(document.getElementById('cmpFGChart'),{type:'line',data:{labels,datasets:fDs},
       plugins:[dgtZoneBands],
       options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
