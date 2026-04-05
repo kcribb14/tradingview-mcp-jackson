@@ -157,6 +157,17 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <div class="chart-area"><div class="chart-box"><canvas id="scatter"></canvas></div></div>
 </div>
 <div class="cat-bar scanner-hidden" id="catBar"></div>
+<div id="sectorBandSection" class="scanner-hidden" style="display:none;padding:8px 16px">
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <div style="flex:1;min-width:300px"><div style="position:relative;height:300px;background:#181a20;border:1px solid #2b2f36;border-radius:8px"><canvas id="sectorBandChart"></canvas></div></div>
+    <div style="width:260px"><div style="height:300px;background:#181a20;border:1px solid #2b2f36;border-radius:8px;position:relative"><canvas id="sectorHistChart"></canvas></div></div>
+  </div>
+  <div id="sectorBandInfo" style="font-size:11px;color:#848e9c;padding:6px 0;display:flex;gap:16px;flex-wrap:wrap"></div>
+  <div id="sectorExtremesContainer" style="display:flex;gap:12px;margin-top:4px;font-size:11px">
+    <div id="sectorFearTable" style="flex:1"></div>
+    <div id="sectorGreedTable" style="flex:1"></div>
+  </div>
+</div>
 <div class="filters scanner-hidden" id="filters">
   <input id="search" placeholder="Search symbol..." oninput="renderTable()">
   <button class="btn" onclick="applyPreset('fear')">Fear</button>
@@ -510,10 +521,13 @@ function goPage(d){curPage=Math.max(1,Math.min(D.pages||1,curPage+d));loadPage(c
 function goTo(p){curPage=p;loadPage(p)}
 function doSort(c){if(!c)return;if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='f'||c==='m'?1:-1};loadPage(1)}
 function switchTF(tf){cTF=tf;sCol=tfKey[tf]||'f';loadPage(1);loadScatter()}
+let sectorBandChart=null,sectorHistChart=null;
 function switchCat(c){
   cCat=c||null;loadPage(1);loadScatter();
   const bar=document.getElementById('sectorBar');
-  if(!c){bar.style.display='none';return}
+  const bandSection=document.getElementById('sectorBandSection');
+  if(!c){bar.style.display='none';bandSection.style.display='none';return}
+  loadSectorBand(c);
   bar.style.display='';bar.innerHTML='Loading sector...';
   fetch('/api/sector/'+encodeURIComponent(c)).then(r=>r.json()).then(d=>{
     if(d.error){bar.style.display='none';return}
@@ -528,6 +542,77 @@ function switchCat(c){
       '</div>';
   }).catch(()=>{bar.style.display='none'});
 }
+async function loadSectorBand(cat){
+  const bandSection=document.getElementById('sectorBandSection');
+  bandSection.style.display='';
+  try{
+    const r=await fetch('/api/sector-band/'+encodeURIComponent(cat));
+    const d=await r.json();
+    if(d.error){bandSection.style.display='none';return}
+
+    // ─── Band Chart (percentile ribbon) ───
+    if(sectorBandChart){sectorBandChart.destroy();sectorBandChart=null}
+    const bCv=document.getElementById('sectorBandChart');
+    const cur=d.current;
+    // For now, single snapshot → show as a vertical bar with percentile markers
+    // As history accumulates, this becomes a time-series ribbon
+    const histDates=d.history?.map(h=>h.date)||[new Date().toISOString().slice(0,10)];
+    const p10=d.history?.map(h=>h.p10)||[cur.p10];
+    const p25=d.history?.map(h=>h.p25)||[cur.p25];
+    const med=d.history?.map(h=>h.median)||[cur.median];
+    const p75=d.history?.map(h=>h.p75)||[cur.p75];
+    const p90=d.history?.map(h=>h.p90)||[cur.p90];
+    const avg=d.history?.map(h=>h.avg)||[cur.avg];
+
+    sectorBandChart=new Chart(bCv,{type:'line',data:{labels:histDates,datasets:[
+      {data:p90,fill:'+1',backgroundColor:'rgba(14,203,129,0.06)',borderWidth:0,pointRadius:3,pointBackgroundColor:'#0ecb8140',label:'90th'},
+      {data:p10,fill:false,borderWidth:0,pointRadius:3,pointBackgroundColor:'#f6465d40',label:'10th'},
+      {data:p75,fill:'+1',backgroundColor:'rgba(14,203,129,0.12)',borderWidth:0,pointRadius:2,pointBackgroundColor:'#0ecb8160',label:'75th'},
+      {data:p25,fill:false,borderWidth:0,pointRadius:2,pointBackgroundColor:'#f6465d60',label:'25th'},
+      {data:med,borderColor:'#eaecef',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#eaecef',label:'Median'},
+      {data:avg,borderColor:'#f0b90b',borderWidth:1.5,borderDash:[5,3],pointRadius:3,pointBackgroundColor:'#f0b90b',label:'Average'},
+    ]},plugins:[dgtZoneBands],options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,position:'top',labels:{color:'#848e9c',font:{size:9},usePointStyle:true}},datalabels:{display:false}},
+      scales:{x:{grid:{display:false},ticks:{color:'#5e6673',font:{size:9}}},y:{min:-60,max:100,grid:{color:'#1e232920'},ticks:{color:'#848e9c',font:{size:9}}}}}});
+
+    // ─── Histogram ───
+    if(sectorHistChart){sectorHistChart.destroy();sectorHistChart=null}
+    const hCv=document.getElementById('sectorHistChart');
+    const dist=d.distribution||{};
+    const bucketLabels=Object.keys(dist).sort((a,b)=>+a-+b);
+    const bucketVals=bucketLabels.map(k=>dist[k]);
+    const bucketColors=bucketLabels.map(k=>{const v=+k;return v<-30?'#910000':v<-20?'#ff5252':v<-10?'#ff9800':v<0?'#c8b86a':v<10?'#A19F8F':v<20?'#65a095':v<30?'#50b050':'#2e8f2e'});
+
+    sectorHistChart=new Chart(hCv,{type:'bar',data:{
+      labels:bucketLabels.map(k=>+k+' to '+(+k+10)),
+      datasets:[{data:bucketVals,backgroundColor:bucketColors,borderWidth:0}]
+    },options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{legend:{display:false},datalabels:{display:false},tooltip:{callbacks:{label:ctx=>ctx.raw+' symbols'}}},
+      scales:{x:{grid:{display:false},ticks:{color:'#5e6673',font:{size:9}}},y:{grid:{display:false},ticks:{color:'#848e9c',font:{size:9}}}}}});
+
+    // ─── Info bar ───
+    document.getElementById('sectorBandInfo').innerHTML=
+      '<span>'+cat+': <b>'+d.count+'</b> symbols</span>'+
+      '<span>Median: <b>'+(cur.median>0?'+':'')+cur.median+'</b></span>'+
+      '<span>Avg: <b>'+(cur.avg>0?'+':'')+cur.avg+'</b></span>'+
+      '<span>Band: <b>'+cur.bandWidth+' pts</b>'+(cur.bandWidth>30?' (wide)':' (narrow)')+'</span>'+
+      '<span>Fear: <b style="color:#f6465d">'+cur.pctFear+'%</b></span>'+
+      '<span>Greed: <b style="color:#0ecb81">'+cur.pctGreed+'%</b></span>';
+
+    // ─── Extreme tables ───
+    function extremeTable(title,items,isGreed){
+      let h='<div style="font-size:10px;font-weight:600;color:'+(isGreed?'#f6465d':'#0ecb81')+';margin-bottom:4px">'+title+'</div>';
+      h+='<table class="sig-table" style="font-size:10px"><tr><th>Symbol</th><th>F&G</th><th>Signal</th></tr>';
+      items.forEach(s=>{
+        h+='<tr style="cursor:pointer" onclick="toggleRowExpand(\''+s.s+'\',\''+cat+'\',this)"><td style="font-weight:600">'+s.s+'</td><td>'+fgBadge(s.f)+'</td><td style="font-size:9px">'+(s.w||'—')+(s.gp?' '+s.gp:'')+'</td></tr>';
+      });
+      return h+'</table>';
+    }
+    document.getElementById('sectorFearTable').innerHTML=extremeTable('MOST FEARFUL (bottom 10)',d.topFear,false);
+    document.getElementById('sectorGreedTable').innerHTML=extremeTable('MOST GREEDY (top 10)',d.topGreed,true);
+  }catch(e){bandSection.style.display='none'}
+}
+
 function toggleWL(){showWL=!showWL;cCat=null;renderTable();renderCatBar()}
 function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null,whale:null,smartMin:null};
   if(p==='fear')filters.fg_max=-10;

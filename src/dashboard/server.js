@@ -570,6 +570,67 @@ app.get('/api/discover', async (req, res) => {
   } catch (e) { res.json({ error: e.message }); }
 });
 
+// Sector band stats
+app.get('/api/sector-band/:category', (req, res) => {
+  const cat = req.params.category;
+  const rows = DATA.rows.filter(r => r.c === cat || r.c.includes(cat));
+  if (rows.length === 0) return res.json({ error: 'No symbols' });
+
+  const scores = rows.map(r => r.f).filter(v => v != null).sort((a, b) => a - b);
+  const n = scores.length;
+  const pctl = p => n > 0 ? scores[Math.min(n - 1, Math.floor(n * p / 100))] : 0;
+  const avg = n > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / n * 10) / 10 : 0;
+
+  // Distribution histogram
+  const buckets = {};
+  for (let b = -60; b < 100; b += 10) buckets[b] = 0;
+  for (const s of scores) { const b = Math.floor(s / 10) * 10; if (buckets[b] !== undefined) buckets[b]++; else if (b >= 40) buckets[40] = (buckets[40] || 0) + 1; }
+
+  // Top/bottom
+  const topFear = [...rows].sort((a, b) => (a.f ?? 0) - (b.f ?? 0)).slice(0, 10).map(r => ({ s: r.s, f: r.f, p: r.p, fs: r.fs, fg_gap: r.fg_gap, gs: r.gs, gp: r.gp, w: r.w }));
+  const topGreed = [...rows].sort((a, b) => (b.f ?? 0) - (a.f ?? 0)).slice(0, 10).map(r => ({ s: r.s, f: r.f, p: r.p, w: r.w }));
+
+  // History from snapshots (if available)
+  let history = [];
+  try {
+    const histDir = join(HOME, '.tradingview-mcp', 'history');
+    if (existsSync(histDir)) {
+      const files = readdirSync(histDir).filter(f => f.startsWith('snapshot-')).sort();
+      // For now, just show current as a single point (history builds over days)
+      history = [{ date: new Date().toISOString().slice(0, 10), p10: pctl(10), p25: pctl(25), median: pctl(50), p75: pctl(75), p90: pctl(90), avg }];
+    }
+  } catch {}
+
+  res.json({
+    category: cat, count: n,
+    current: { p10: pctl(10), p25: pctl(25), median: pctl(50), p75: pctl(75), p90: pctl(90), avg, bandWidth: Math.round((pctl(90) - pctl(10)) * 10) / 10, pctFear: Math.round(scores.filter(s => s < -10).length / n * 100), pctGreed: Math.round(scores.filter(s => s > 10).length / n * 100) },
+    distribution: buckets,
+    topFear, topGreed, history,
+  });
+});
+
+// Sector comparison — all sectors ranked
+app.get('/api/sector-compare', (req, res) => {
+  const cats = {};
+  for (const r of DATA.rows) {
+    if (!cats[r.c]) cats[r.c] = [];
+    cats[r.c].push(r.f);
+  }
+  const sectors = Object.entries(cats).map(([name, scores]) => {
+    scores.sort((a, b) => a - b);
+    const n = scores.length;
+    const pctl = p => scores[Math.min(n - 1, Math.floor(n * p / 100))];
+    const avg = n > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / n * 10) / 10 : 0;
+    return {
+      name, count: n, avg, median: pctl(50),
+      spread: Math.round((pctl(90) - pctl(10)) * 10) / 10,
+      pctFear: Math.round(scores.filter(s => s < -10).length / n * 100),
+      pctGreed: Math.round(scores.filter(s => s > 10).length / n * 100),
+    };
+  }).sort((a, b) => a.avg - b.avg); // Deepest fear first
+  res.json({ sectors });
+});
+
 // Geological data endpoint
 app.get('/api/geology/:symbol', (req, res) => {
   const sym = req.params.symbol;
