@@ -79,9 +79,10 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <div class="cat-bar" id="catBar"></div>
 <div class="filters">
   <input id="search" placeholder="Search symbol..." oninput="renderTable()">
-  <label><input type="checkbox" id="fearOnly" onchange="renderTable()"> Fear only</label>
-  <button class="btn" onclick="applyPreset('extreme')">Extreme Fear</button>
+  <button class="btn" onclick="applyPreset('fear')">Fear</button>
+  <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
   <button class="btn" onclick="applyPreset('entry')">Entry Zones</button>
+  <button class="btn" onclick="applyPreset('greed')">Greed</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
@@ -149,13 +150,28 @@ function renderSidebar(){
   const tp=Math.max(0,Math.min(100,(avgFG+50)/100*100));
   const ac=avgFG<=-15?'#f6465d':avgFG<=-5?'#e65100':avgFG>=15?'#0ecb81':avgFG>=5?'#2e8f2e':'#848e9c';
   const pF=s.total>0?Math.round(s.oversold/(s.total)*100):0;
+  // Key assets
+  let kaHtml='';
+  if(D.keyAssets?.length>0){
+    kaHtml='<div class="card"><div class="card-t">Market Overview</div>';
+    for(const a of D.keyAssets){
+      const dc=fgColor(a.f);
+      kaHtml+='<div class="card-row" style="cursor:pointer" onclick="openDM(\''+a.s+'\')"><span>'+a.s+'</span><span style="display:flex;gap:6px;align-items:center"><span>$'+(a.p>=1?a.p.toFixed(0):a.p.toFixed(2))+'</span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+dc+'"></span><span style="font-size:10px;color:'+dc+'">'+(a.f>0?'+':'')+a.f.toFixed(0)+'</span></span></div>';
+    }
+    kaHtml+='</div>';
+  }
+
+  // Signals summary
+  const sig=D.signals||{};
+  const sigHtml='<div class="card"><div class="card-t">Signals</div>'+
+    '<div class="card-row" style="cursor:pointer" onclick="applyPreset(\'entry\')"><span>Entry Zones</span><span style="color:#0ecb81;font-weight:600">'+(sig.entry||0)+'</span></div>'+
+    '<div class="card-row"><span>Watching</span><span style="color:#f0b90b">'+(sig.watching||0)+'</span></div>'+
+    '<div class="card-row"><span>Exit / Take Profit</span><span style="color:#f6465d">'+(sig.exit||0)+'</span></div></div>';
+
   document.getElementById('sidebar').innerHTML=
     '<div class="card"><div class="card-t">Avg F&G ('+cTF+')</div><div class="card-v" style="color:'+ac+'">'+(avgFG>0?'+':'')+avgFG+'</div>'+
     '<div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-th" style="left:'+tp+'%"></div></div><div class="card-lb"><span>Fear</span><span>Greed</span></div></div>'+
-    '<div class="card"><div class="card-t">Signals</div>'+
-    '<div class="card-row"><span>Oversold</span><span style="color:#0ecb81">'+(s.oversold||0)+'</span></div>'+
-    '<div class="card-row"><span>Overbought</span><span style="color:#f6465d">'+(s.overbought||0)+'</span></div>'+
-    '<div class="card-row"><span>Total</span><span>'+(s.total||0)+'</span></div></div>';
+    kaHtml+sigHtml;
 }
 
 function renderTFBar(){
@@ -178,22 +194,37 @@ function renderScatter(){
   const ct=canvas.parentElement;canvas.width=ct.clientWidth;canvas.height=ct.clientHeight;
   const dots=(D.scatterDots||[]).filter(r=>r.m>0);
   const fk=tfKey[cTF]||'f';
+  // Labels: top by mcap + extremes. Limit total to avoid overlap.
   const labelSet=new Set();
-  [...dots].sort((a,b)=>b.m-a.m).slice(0,12).forEach(d=>labelSet.add(d.s));
-  dots.filter(r=>(r[fk]??r.f)<-30||(r[fk]??r.f)>20).slice(0,10).forEach(d=>labelSet.add(d.s));
+  const maxLabels=Math.min(25, Math.ceil(dots.length*0.05));
+  [...dots].sort((a,b)=>b.m-a.m).slice(0,Math.ceil(maxLabels*0.4)).forEach(d=>labelSet.add(d.s));
+  const sorted2=[...dots].sort((a,b)=>(a[fk]??a.f)-(b[fk]??b.f));
+  sorted2.slice(0,Math.ceil(maxLabels*0.3)).forEach(d=>labelSet.add(d.s)); // Most fearful
+  sorted2.slice(-Math.ceil(maxLabels*0.3)).forEach(d=>labelSet.add(d.s)); // Most greedy
   const data=dots.map(r=>({x:r.m,y:r[fk]??r.f,label:r.s,show:labelSet.has(r.s)}));
+
+  // Auto-scale axes to fit data with padding
+  const mcaps=data.map(d=>d.x).filter(v=>v>0);
+  const fgs=data.map(d=>d.y).filter(v=>v!=null&&isFinite(v));
+  const xMin=mcaps.length>0?Math.max(1e5,Math.min(...mcaps)*0.3):1e7;
+  const xMax=mcaps.length>0?Math.max(...mcaps)*2:3e12;
+  const fgMin=fgs.length>0?Math.min(...fgs):0;
+  const fgMax=fgs.length>0?Math.max(...fgs):0;
+  const yPad=Math.max(10,(fgMax-fgMin)*0.15);
+  const yMin=Math.floor(fgMin-yPad);
+  const yMax=Math.ceil(fgMax+yPad);
 
   if(chart)chart.destroy();
   chart=new Chart(canvas,{type:'scatter',data:{datasets:[{
     data:data.map(d=>({x:d.x,y:d.y})),
     pointBackgroundColor:data.map(d=>d.y<=-25?'#0ecb81':d.y<=-10?'#26a17b':d.y>=25?'#f6465d':d.y>=10?'#cf304a':'#6b7280'),
-    pointBorderColor:'transparent',pointRadius:data.map(d=>d.show?4:2),pointHoverRadius:6,
+    pointBorderColor:'transparent',pointRadius:data.map(d=>d.x>1e11?8:d.x>1e10?5:d.x>1e9?4:d.x>1e8?3:2),pointHoverRadius:8,
     datalabels:{display:ctx=>data[ctx.dataIndex].show,color:'#eaecef',font:{size:9,weight:'bold'},anchor:'end',align:'top',offset:1,formatter:(v,ctx)=>data[ctx.dataIndex].label,textStrokeColor:'#0b0e11',textStrokeWidth:2}
   }]},options:{responsive:false,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{
     title:ctx=>data[ctx[0].dataIndex].label,label:ctx=>['F&G: '+(ctx.raw.y>0?'+':'')+ctx.raw.y.toFixed(1),'MCap: '+fmt$(ctx.raw.x)]
   },backgroundColor:'#1e2329',borderColor:'#2b2f36',borderWidth:1,titleColor:'#f0b90b',bodyColor:'#eaecef'}},
-  scales:{x:{type:'logarithmic',reverse:true,min:1e7,max:3e12,grid:{color:'#1e232960'},ticks:{color:'#848e9c',callback:v=>fmt$(v),maxTicksLimit:7},title:{display:true,text:'Market Cap',color:'#5e6673',font:{size:10}}},
-  y:{min:-60,max:90,grid:{color:'#1e232940'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},title:{display:true,text:'F&G ('+cTF+')',color:'#5e6673',font:{size:10}}}}},
+  scales:{x:{type:'logarithmic',reverse:true,min:xMin,max:xMax,grid:{color:'#1e232960'},ticks:{color:'#848e9c',callback:v=>fmt$(v),maxTicksLimit:7},title:{display:true,text:'Market Cap',color:'#5e6673',font:{size:10}}},
+  y:{min:yMin,max:yMax,grid:{color:'#1e232940'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v},title:{display:true,text:'F&G ('+cTF+')',color:'#5e6673',font:{size:10}}}}},
   plugins:[{id:'bg',beforeDraw(ch){const ctx2=ch.ctx;const{top,bottom,left,right}=ch.chartArea;const yS=ch.scales.y;
     for(const[f,t,c]of[[73,90,'rgba(0,100,0,.2)'],[41,73,'rgba(46,143,46,.12)'],[10,41,'rgba(80,176,80,.06)'],[5,10,'rgba(101,160,149,.04)'],[-5,5,'rgba(161,159,143,.04)'],[-10,-5,'rgba(200,184,106,.04)'],[-25,-10,'rgba(255,152,0,.06)'],[-41,-25,'rgba(255,82,82,.12)'],[-60,-41,'rgba(145,0,0,.2)']]){
       ctx2.fillStyle=c;ctx2.fillRect(left,yS.getPixelForValue(t),right-left,yS.getPixelForValue(f)-yS.getPixelForValue(t))}
@@ -208,35 +239,72 @@ function renderTable(){
   if(showWL)rows=rows.filter(r=>FAVS.includes(r.s));
   if(document.getElementById('fearOnly')?.checked)rows=rows.filter(r=>r.f<=-5);
   if(filters.fg_max!=null)rows=rows.filter(r=>r.f<=filters.fg_max);
+  if(filters.fg_min!=null)rows=rows.filter(r=>r.f>=filters.fg_min);
   if(filters.swing)rows=rows.filter(r=>r.w===filters.swing);
 
   const fk=tfKey[cTF]||'f';
-  const cols=[{k:'',l:'★'},{k:'s',l:'Symbol',S:1},{k:'p',l:'Price',S:1,h:1},{k:'m',l:'MCap',S:1,h:1},{k:'f',l:'Daily',S:1},{k:'f1',l:'15m',S:1,h:1},{k:'fh',l:'1H',S:1,h:1},{k:'f4',l:'4H',S:1,h:1},{k:'fw',l:'Wk',S:1,h:1},{k:'z',l:'Zone'},{k:'w',l:'Signal'}];
+  const cols=[
+    {k:'',l:'★',w:'30px'},{k:'',l:'#',w:'35px'},{k:'s',l:'Name',S:1},{k:'p',l:'Price',S:1},
+    {k:'m',l:'Market Cap',S:1,h:1},{k:'f',l:'F&G Daily',S:1},{k:'f1',l:'15m',S:1,h:1},
+    {k:'fh',l:'1H',S:1,h:1},{k:'f4',l:'4H',S:1,h:1},{k:'fw',l:'Wk',S:1,h:1},
+    {k:'z',l:'Zone'},{k:'w',l:'Signal'}
+  ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
-  document.getElementById('thead').innerHTML=cols.map(c=>'<th'+(c.S?' onclick="doSort(\''+c.k+'\')"':'')+(c.h?' class="hm"':'')+' style="'+(c.k===fk?'color:#f0b90b':'')+'">'+c.l+(c.S?ar(c.k):'')+'</th>').join('');
+  document.getElementById('thead').innerHTML=cols.map(c=>{
+    const active=c.k===fk;
+    return'<th'+(c.S?' onclick="doSort(\''+c.k+'\')"':'')+(c.h?' class="hm"':'')
+      +' style="'+(active?'color:#f0b90b;':'')+(c.w?'width:'+c.w:'')+'">'+c.l+(c.S?ar(c.k):'')+'</th>';
+  }).join('');
 
+  const pageStart=(curPage-1)*pageSize;
   document.getElementById('tbody').innerHTML=rows.map((r,i)=>{
     const isFav=FAVS.includes(r.s);
     const pr=r.p>=1?'$'+r.p.toFixed(2):r.p>0.001?'$'+r.p.toFixed(4):r.p>0?'$'+r.p.toExponential(2):'—';
     const sw=r.w==='ENTRY ZONE'?'<span class="sw sw-e">ENTRY</span>':r.w==='WATCHING'?'<span class="sw sw-w">WATCH</span>':r.w==='EXIT ZONE'||r.w==='TAKE PROFIT'?'<span class="sw sw-x">EXIT</span>':'';
-    return'<tr><td><span class="star '+(isFav?'on':'')+'" onclick="toggleFav(\''+r.s+'\',event)">'+(isFav?'★':'☆')+'</span></td>'+
-      '<td class="sym" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">'+r.s+'</td><td class="hm">'+pr+'</td><td class="hm" style="color:#848e9c">'+fmt$(r.m)+'</td>'+
-      '<td>'+fgBadge(r.f)+'</td><td class="hm">'+fgBadge(r.f1)+'</td><td class="hm">'+fgBadge(r.fh)+'</td><td class="hm">'+fgBadge(r.f4)+'</td><td class="hm">'+fgBadge(r.fw)+'</td>'+
-      '<td>'+zone(r.f)+'</td><td>'+sw+'</td></tr>';
+    return'<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">'+
+      '<td onclick="event.stopPropagation()"><span class="star '+(isFav?'on':'')+'" onclick="toggleFav(\''+r.s+'\',event)">'+(isFav?'★':'☆')+'</span></td>'+
+      '<td style="color:#848e9c">'+(pageStart+i+1)+'</td>'+
+      '<td class="sym">'+r.s+'<span style="color:#5e6673;font-weight:400;margin-left:4px;font-size:10px">'+r.c+'</span></td>'+
+      '<td>'+pr+'</td>'+
+      '<td class="hm" style="color:#848e9c">'+fmt$(r.m)+'</td>'+
+      '<td>'+fgBadge(r.f)+'</td>'+
+      '<td class="hm">'+fgBadge(r.f1)+'</td><td class="hm">'+fgBadge(r.fh)+'</td>'+
+      '<td class="hm">'+fgBadge(r.f4)+'</td><td class="hm">'+fgBadge(r.fw)+'</td>'+
+      '<td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td><td>'+sw+'</td></tr>';
   }).join('');
 
+  const tp=D.pages||1;
+  let pgHtml='<button class="btn" onclick="goPage(-1)" '+(curPage<=1?'disabled':'')+' style="font-size:11px">◀</button>';
+  // Show page numbers: first, current±2, last
+  const pages=new Set([1]);
+  for(let p=Math.max(1,curPage-2);p<=Math.min(tp,curPage+2);p++)pages.add(p);
+  pages.add(tp);
+  let last=0;
+  for(const p of[...pages].sort((a,b)=>a-b)){
+    if(p-last>1)pgHtml+='<span style="color:#5e6673;padding:0 4px">…</span>';
+    pgHtml+='<button class="btn'+(p===curPage?' active':'')+'" onclick="goTo('+p+')" style="font-size:11px;padding:3px 8px;min-width:28px">'+p+'</button>';
+    last=p;
+  }
+  pgHtml+='<button class="btn" onclick="goPage(1)" '+(curPage>=tp?'disabled':'')+' style="font-size:11px">▶</button>';
+  pgHtml+=' <select onchange="pageSize=+this.value;loadPage(1)" style="background:#2b3139;color:#eaecef;border:1px solid #363a45;border-radius:3px;font-size:11px;padding:2px">';
+  for(const sz of[50,100,200,500])pgHtml+='<option value="'+sz+'"'+(sz===pageSize?' selected':'')+'>'+sz+'/page</option>';
+  pgHtml+='</select>';
   document.getElementById('pager').innerHTML=
-    '<span>Page '+curPage+' of '+(D.pages||1)+' ('+rows.length+' shown / '+(D.total||0)+' total)</span>'+
-    '<span><button class="btn" onclick="goPage(-1)" '+(curPage<=1?'disabled':'')+'>◀ Prev</button> '+
-    '<button class="btn" onclick="goPage(1)" '+(curPage>=(D.pages||1)?'disabled':'')+'>Next ▶</button></span>';
+    '<span style="font-size:11px">Showing '+(pageStart+1)+'-'+Math.min(pageStart+rows.length,D.total||0)+' of '+(D.total||0)+'</span><span>'+pgHtml+'</span>';
 }
 
 function goPage(d){curPage=Math.max(1,Math.min(D.pages||1,curPage+d));loadPage(curPage)}
+function goTo(p){curPage=p;loadPage(p)}
 function doSort(c){if(!c)return;if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='f'||c==='m'?1:-1};loadPage(1)}
 function switchTF(tf){cTF=tf;sCol=tfKey[tf]||'f';loadPage(1);loadScatter()}
 function switchCat(c){cCat=c||null;loadPage(1);loadScatter()}
 function toggleWL(){showWL=!showWL;cCat=null;renderTable();renderCatBar()}
-function applyPreset(p){filters={fg_max:null,swing:null};if(p==='extreme')filters.fg_max=-30;if(p==='entry')filters.swing='ENTRY ZONE';renderTable()}
+function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null};
+  if(p==='fear')filters.fg_max=-10;
+  if(p==='extreme')filters.fg_max=-30;
+  if(p==='entry')filters.swing='ENTRY ZONE';
+  if(p==='greed')filters.fg_min=25;
+  renderTable()}
 async function refresh(){await loadPage(curPage);loadScatter()}
 async function toggleFav(s,ev){ev?.stopPropagation();if(FAVS.includes(s)){FAVS=FAVS.filter(x=>x!==s);fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}else{FAVS.push(s);fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}renderTable();renderCatBar()}
 
@@ -274,7 +342,18 @@ async function openInTV(){if(dmSym)fetch('/api/open-in-tv',{method:'POST',header
 async function addToken(){const v=document.getElementById('addInput').value.trim();if(!v)return;document.getElementById('addInput').value='Adding...';try{const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})});const d=await r.json();document.getElementById('addInput').value='';if(d.token)alert('Added: '+d.token.symbol);else alert(d.error||'Failed');refresh()}catch(e){document.getElementById('addInput').value=v;alert(e.message)}}
 
 // Keyboard shortcuts
-document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='/')document.getElementById('search').focus();if(e.key==='Escape')closeDM();if(e.key==='f')document.getElementById('fearOnly').click();if(e.key==='w')toggleWL()});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='/'){e.preventDefault();document.getElementById('search').focus()}
+  if(e.key==='Escape')closeDM();
+  if(e.key==='f')applyPreset('fear');
+  if(e.key==='e')applyPreset('extreme');
+  if(e.key==='w')toggleWL();
+  if(e.key==='c')applyPreset('clear');
+  if(e.key==='ArrowLeft')goPage(-1);
+  if(e.key==='ArrowRight')goPage(1);
+  if(e.key>='1'&&e.key<='5'){const tfs2=['Daily','15m','1H','4H','Weekly'];switchTF(tfs2[+e.key-1])}
+});
 
 // Boot
 window.addEventListener('resize',()=>{if(D.scatterDots)renderScatter()});

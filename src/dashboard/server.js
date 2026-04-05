@@ -5,6 +5,7 @@
  * Serves 11,000+ symbols reliably with <200ms response times.
  */
 import express from 'express';
+import compression from 'compression';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -18,6 +19,7 @@ const app = express();
 const PORT = 3000;
 const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
 
+app.use(compression());
 app.use(express.json());
 
 // ─── In-memory data store (loaded once, refreshed periodically) ─────────────
@@ -168,12 +170,26 @@ app.get('/api/cached', (req, res) => {
     const start = (page - 1) * limit;
     const symbols = filtered.slice(start, start + limit);
 
+    // Key assets for sidebar
+    const keyAssets = ['BTC','ETH','SPY','AAPL'].map(sym => {
+      const r = DATA.rows.find(x => x.s === sym);
+      return r ? { s: r.s, p: r.p, f: r.f, z: r.z } : null;
+    }).filter(Boolean);
+
+    // Signal counts
+    const signals = {
+      entry: DATA.rows.filter(r => r.w === 'ENTRY ZONE').length,
+      watching: DATA.rows.filter(r => r.w === 'WATCHING').length,
+      exit: DATA.rows.filter(r => r.w === 'TAKE PROFIT' || r.w === 'EXIT ZONE').length,
+    };
+
     res.json({
       symbols, total, page, pages, limit,
       stats: DATA.stats,
       categories: DATA.categories,
       tfCounts: DATA.tfCounts,
       updated: DATA.updated,
+      keyAssets, signals,
     });
   } catch (e) {
     res.status(500).json({ error: e.message, symbols: [], total: 0, page: 1, pages: 0 });
