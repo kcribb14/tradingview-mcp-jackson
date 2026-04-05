@@ -79,6 +79,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
       <button class="btn active" onclick="switchView('scanner')" id="navScanner">Scanner</button>
       <button class="btn" onclick="switchView('watchgrid')" id="navWatchgrid">★ Watchlist</button>
       <button class="btn" onclick="switchView('signals')" id="navSignals">Signals</button>
+      <button class="btn" onclick="switchView('cycle')" id="navCycle">Cycle</button>
     </div>
     <span id="meta" style="font-size:11px;color:#848e9c">Loading...</span>
   </div>
@@ -123,6 +124,10 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <!-- Signals view -->
 <div id="viewSignals" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
   <div id="signalsContent" style="color:#848e9c">Loading signals...</div>
+</div>
+<!-- Cycle view -->
+<div id="viewCycle" style="display:none;padding:12px;max-width:1200px;margin:0 auto">
+  <div id="cycleContent" style="color:#848e9c">Loading cycle data...</div>
 </div>
 <div class="pager" id="pager"></div>
 <div style="padding:8px 16px;font-size:10px;color:#5e6673;border-top:1px solid #1e2329;margin-top:4px">
@@ -628,6 +633,79 @@ function toggleFavDM(){if(!dmSym)return;toggleFav(dmSym);document.getElementById
 async function openInTV(){if(dmSym)fetch('/api/open-in-tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:dmSym})})}
 async function addToken(){const v=document.getElementById('addInput').value.trim();if(!v)return;document.getElementById('addInput').value='Adding...';try{const r=await fetch('/api/add-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})});const d=await r.json();document.getElementById('addInput').value='';if(d.token)alert('Added: '+d.token.symbol);else alert(d.error||'Failed');refresh()}catch(e){document.getElementById('addInput').value=v;alert(e.message)}}
 
+// ─── Cycle View ─────────────────────────────────────────────────────────────
+async function loadCycle(){
+  const el=document.getElementById('cycleContent');
+  el.innerHTML='Loading cycle data...';
+  try{
+    const r=await fetch('/api/cycle');
+    const d=await r.json();
+    let html='';
+
+    // Phase banner
+    const phaseCol=d.phase.includes('RISK OFF')?'#f6465d':d.phase.includes('RISK ON')?'#0ecb81':'#f0b90b';
+    html+='<div style="background:#181a20;border:2px solid '+phaseCol+';border-radius:8px;padding:12px 16px;margin-bottom:16px;text-align:center"><span style="font-size:16px;font-weight:700;color:'+phaseCol+'">'+d.phase+'</span></div>';
+
+    // Rotation pipeline
+    html+='<div class="sig-section"><div class="sig-title">ROTATION PIPELINE</div>';
+    html+='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;justify-content:center;margin:12px 0">';
+    d.stages.forEach((s,i)=>{
+      const col=s.status==='greed'?'#0ecb81':s.status==='neutral'?'#f0b90b':s.status==='fear'?'#ff9800':'#f6465d';
+      const bg=s.status==='greed'?'#0ecb8115':s.status==='neutral'?'#f0b90b15':'#f6465d15';
+      html+='<div style="background:'+bg+';border:1px solid '+col+'44;border-radius:6px;padding:8px 12px;text-align:center;min-width:110px">';
+      html+='<div style="font-size:16px">'+s.emoji+'</div>';
+      html+='<div style="font-size:11px;font-weight:600;color:#eaecef">'+s.name+'</div>';
+      html+='<div style="font-size:14px;font-weight:700;color:'+col+'">'+(s.fg!=null?(s.fg>0?'+':'')+s.fg.toFixed(1):'—')+'</div>';
+      html+='</div>';
+      if(i<d.stages.length-1)html+='<span style="color:#5e6673;font-size:18px">→</span>';
+    });
+    html+='</div></div>';
+
+    // Lead-Lag table
+    html+='<div class="sig-section"><div class="sig-title">LEAD-LAG ANALYSIS</div>';
+    html+='<table class="sig-table"><tr><th>Leader</th><th>F&G</th><th>Follower</th><th>F&G</th><th>Gap</th><th>Signal</th></tr>';
+    d.leadLag.forEach(l=>{
+      const gapCol=l.gap>10?'#0ecb81':l.gap<-10?'#f6465d':'#848e9c';
+      html+='<tr><td style="font-weight:600">'+l.names[0]+'</td><td>'+fgBadge(l.leaderFG)+'</td><td style="font-weight:600">'+l.names[1]+'</td><td>'+fgBadge(l.followerFG)+'</td><td style="color:'+gapCol+';font-weight:600">'+(l.gap!=null?l.gap:'—')+'</td><td style="font-size:11px;color:#848e9c">'+l.signal+'</td></tr>';
+    });
+    html+='</table></div>';
+
+    // Altcoin Season + Breadth side by side
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">';
+
+    // Alt season gauge
+    const asPct=d.altSeason.pct;const asCol=asPct>=75?'#0ecb81':asPct<=25?'#f0b90b':'#848e9c';
+    html+='<div class="sig-section" style="margin-bottom:0"><div class="sig-title">ALTCOIN SEASON</div>';
+    html+='<div style="text-align:center;padding:8px"><div style="font-size:24px;font-weight:700;color:'+asCol+'">'+d.altSeason.label+'</div>';
+    html+='<div style="background:#2b2f36;border-radius:4px;height:8px;margin:8px 0;position:relative"><div style="background:'+asCol+';height:100%;border-radius:4px;width:'+asPct+'%"></div></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:10px;color:#5e6673"><span>BTC Season</span><span>'+asPct+'% alts beat BTC</span><span>Alt Season</span></div>';
+    html+='</div></div>';
+
+    // Breadth
+    html+='<div class="sig-section" style="margin-bottom:0"><div class="sig-title">MARKET BREADTH (% above EMA)</div>';
+    for(const [g,pct] of Object.entries(d.breadth||{})){
+      const col2=pct>=50?'#0ecb81':pct>=30?'#f0b90b':'#f6465d';
+      html+='<div style="display:flex;justify-content:space-between;padding:3px 0"><span>'+g+'</span><div style="display:flex;align-items:center;gap:6px"><div style="background:#2b2f36;width:80px;height:6px;border-radius:3px"><div style="background:'+col2+';height:100%;border-radius:3px;width:'+pct+'%"></div></div><span style="color:'+col2+';font-weight:600;font-size:11px">'+pct+'%</span></div></div>';
+    }
+    html+='</div>';
+    html+='</div>';
+
+    // Mining rotation
+    html+='<div class="sig-section"><div class="sig-title">MINING SECTOR ROTATION</div>';
+    html+='<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;justify-content:center">';
+    d.mining.forEach((m,i)=>{
+      const mc=m.fg==null?'#848e9c':m.fg>=10?'#0ecb81':m.fg>=-5?'#f0b90b':m.fg>=-15?'#ff9800':'#f6465d';
+      html+='<div style="background:#1e2329;border:1px solid #2b2f36;border-radius:4px;padding:6px 10px;text-align:center;min-width:90px">';
+      html+='<div style="font-size:10px;color:#848e9c">'+m.name+'</div>';
+      html+='<div style="font-size:13px;font-weight:700;color:'+mc+'">'+(m.fg!=null?(m.fg>0?'+':'')+m.fg.toFixed(1):'—')+'</div></div>';
+      if(i<d.mining.length-1)html+='<span style="color:#5e6673">→</span>';
+    });
+    html+='</div></div>';
+
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='Error: '+e.message}
+}
+
 // ─── View switching ─────────────────────────────────────────────────────────
 let curView='scanner';
 const viewEls=['viewScanner','viewWatchgrid','viewSignals'];
@@ -640,6 +718,7 @@ function switchView(view){
   document.getElementById('viewScanner').style.display=view==='scanner'?'':'none';
   document.getElementById('viewWatchgrid').style.display=view==='watchgrid'?'':'none';
   document.getElementById('viewSignals').style.display=view==='signals'?'':'none';
+  document.getElementById('viewCycle').style.display=view==='cycle'?'':'none';
   // Show/hide scanner-specific elements
   const showScanner=view==='scanner';
   ['tfBar','catBar','filters','pager','mainArea'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=showScanner?'':'none'});
@@ -650,6 +729,7 @@ function switchView(view){
   // Load view data
   if(view==='watchgrid')loadWatchlistGrid();
   if(view==='signals')loadSignals();
+  if(view==='cycle')loadCycle();
 }
 
 // ─── Watchlist Grid ─────────────────────────────────────────────────────────

@@ -505,6 +505,80 @@ app.get('/api/worker-status', (req, res) => {
   res.json(workerStatus);
 });
 
+// ─── Business Cycle Rotation ────────────────────────────────────────────────
+
+app.get('/api/cycle', (req, res) => {
+  const r = sym => DATA.rows.find(x => x.s === sym);
+  const avgFG = syms => {
+    const vals = syms.map(s => r(s)?.f).filter(v => v != null);
+    return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10 : null;
+  };
+  const catAvg = cat => {
+    const vals = DATA.rows.filter(x => x.c === cat).map(x => x.f);
+    return vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10 : null;
+  };
+
+  const stages = [
+    { id: 'safety', name: 'Safety', symbols: ['GC=F', 'SI=F', 'TLT', 'GLD', 'SLV'], fg: avgFG(['GC=F', 'SI=F', 'GLD', 'SLV']) },
+    { id: 'commodities', name: 'Commodities', symbols: ['GC=F', 'SI=F', 'CL=F', 'HG=F', 'PL=F'], fg: avgFG(['GC=F', 'SI=F', 'CL=F', 'HG=F', 'PL=F']) },
+    { id: 'equities', name: 'Large Cap Equities', symbols: ['SPY', 'QQQ', 'AAPL', 'MSFT'], fg: catAvg('US Large Cap') },
+    { id: 'smallcap', name: 'Small/Mid Cap', symbols: ['IWM'], fg: catAvg('US Mid/Small') },
+    { id: 'btc_eth', name: 'BTC / ETH', symbols: ['BTC', 'ETH'], fg: avgFG(['BTC', 'ETH']) },
+    { id: 'altcoins', name: 'Altcoins', symbols: ['SOL', 'AVAX', 'DOT', 'LINK'], fg: catAvg('Crypto Mid') },
+    { id: 'memes', name: 'Meme / Micro', symbols: ['DOGE', 'PEPE', 'WIF', 'BONK'], fg: avgFG(['DOGE', 'PEPE', 'WIF', 'BONK']) },
+  ];
+
+  // Determine phase label
+  for (const s of stages) {
+    s.status = s.fg == null ? 'unknown' : s.fg >= 10 ? 'greed' : s.fg >= -5 ? 'neutral' : s.fg >= -15 ? 'fear' : 'deep_fear';
+    s.emoji = { greed: '✅', neutral: '⚠️', fear: '🔴', deep_fear: '💀', unknown: '❓' }[s.status];
+  }
+
+  // Detect current phase
+  const safetyFG = stages[0].fg ?? 0;
+  const riskFG = avgFG(['SPY', 'BTC', 'ETH']) ?? 0;
+  let phase = 'UNKNOWN';
+  if (safetyFG > 5 && riskFG < -10) phase = 'RISK OFF — Money in safety, avoid risk assets';
+  else if (safetyFG > 0 && riskFG > -5) phase = 'MID CYCLE — Balanced, selective opportunities';
+  else if (riskFG > 10) phase = 'RISK ON — Money flowing into risk assets';
+  else if (safetyFG < -5 && riskFG < -15) phase = 'CAPITULATION — Everything selling, potential bottom';
+  else phase = 'EARLY FEAR — Monitor for rotation signals';
+
+  // Lead-lag analysis
+  const leadLag = [
+    { leader: 'GC=F', follower: 'SI=F', names: ['Gold', 'Silver'] },
+    { leader: 'SPY', follower: 'IWM', names: ['S&P 500', 'Small Caps'] },
+    { leader: 'BTC', follower: 'ETH', names: ['Bitcoin', 'Ethereum'] },
+  ].map(pair => {
+    const lFG = r(pair.leader)?.f, fFG = r(pair.follower)?.f;
+    const gap = lFG != null && fFG != null ? Math.round((lFG - fFG) * 10) / 10 : null;
+    const signal = gap > 10 ? 'Follower lagging — potential opportunity' : gap < -10 ? 'Follower leading — unusual' : 'In sync';
+    return { ...pair, leaderFG: lFG, followerFG: fFG, gap, signal };
+  });
+
+  // Altcoin season: % of top alts with higher F&G than BTC
+  const btcFG = r('BTC')?.f ?? -999;
+  const topAlts = ['ETH', 'SOL', 'XRP', 'BNB', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK', 'ATOM',
+    'UNI', 'AAVE', 'LTC', 'NEAR', 'ARB', 'OP', 'APT', 'INJ', 'SUI', 'SEI', 'PEPE', 'HBAR', 'ALGO', 'FTM',
+    'BONK', 'WIF', 'PENDLE', 'IMX', 'MKR', 'SAND', 'MANA', 'FET', 'STX', 'TIA', 'JUP'];
+  const altScores = topAlts.map(s => r(s)?.f).filter(v => v != null);
+  const altsBeatBTC = altScores.filter(v => v > btcFG).length;
+  const altSeasonPct = altScores.length > 0 ? Math.round(altsBeatBTC / altScores.length * 100) : 0;
+  const altSeason = altSeasonPct >= 75 ? 'ALT SEASON' : altSeasonPct <= 25 ? 'BTC SEASON' : 'NEUTRAL';
+
+  // Mining rotation
+  const mining = [
+    { name: 'Gold Price', syms: ['GC=F'], fg: r('GC=F')?.f },
+    { name: 'Gold Majors', syms: ['NST.AX', 'EVN.AX'], fg: avgFG(['NST.AX', 'EVN.AX']) },
+    { name: 'Gold Mid', syms: ['RMS.AX', 'CMM.AX'], fg: avgFG(['RMS.AX', 'CMM.AX']) },
+    { name: 'Gold Micro', syms: ['DEV.AX', 'LOT.AX', 'WR1.AX'], fg: avgFG(['DEV.AX', 'LOT.AX', 'WR1.AX']) },
+    { name: 'Silver', syms: ['SI=F'], fg: r('SI=F')?.f },
+    { name: 'Lithium', syms: ['PLS.AX', 'LTR.AX', 'IGO.AX'], fg: avgFG(['PLS.AX', 'LTR.AX', 'IGO.AX']) },
+  ];
+
+  res.json({ stages, phase, leadLag, altSeason: { pct: altSeasonPct, label: altSeason, btcFG, altsAbove: altsBeatBTC, altsTotal: altScores.length }, mining, breadth: DATA.stats.breadth });
+});
+
 app.post('/api/open-in-tv', async (req, res) => {
   try {
     const { setSymbol } = await import('../core/chart.js');
