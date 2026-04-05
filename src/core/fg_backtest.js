@@ -41,6 +41,19 @@ export function computeTimeSeries(bars) {
   avgGain /= 14;
   avgLoss /= 14;
 
+  // ═══ DGT-correct formula (matches fg_cache.js computeFGFromBars) ═══
+
+  // Warm up moneyFlow RMA state over first 144 bars
+  let mfRMA = null, volRMA = null, fgRMA = null;
+  for (let i = Math.max(0, 144 - 21); i < 144 && i < bars.length; i++) {
+    const b = bars[i];
+    const range = b.high - b.low;
+    const mfRatio = range > 0 ? (2 * b.close - b.low - b.high) / range : 0;
+    const mfVal = mfRatio * (b.volume || 0);
+    mfRMA = mfRMA != null ? updateRMA(mfRMA, mfVal, 21) : mfVal;
+    volRMA = volRMA != null ? updateRMA(volRMA, b.volume || 0, 21) : (b.volume || 0);
+  }
+
   // Calculate F&G at each bar from position 144 onward
   for (let i = 144; i < bars.length; i++) {
     ema144 = updateEMA(ema144, closes[i], 144);
@@ -50,39 +63,44 @@ export function computeTimeSeries(bars) {
     avgGain = updateRMA(avgGain, rsiDiff > 0 ? rsiDiff : 0, 14);
     avgLoss = updateRMA(avgLoss, rsiDiff < 0 ? Math.abs(rsiDiff) : 0, 14);
 
-    // pmacd
-    const pmacdRaw = ema144 > 0 ? (closes[i] / ema144 - 1) * 100 : 0;
-    const pmacd = Math.max(-40, Math.min(40, pmacdRaw * 3));
+    // pmacd: (close / ema144 - 1) * 100 — NO scaling, clamped ±60
+    const pmacd = ema144 > 0 ? Math.max(-60, Math.min(60, (closes[i] / ema144 - 1) * 100)) : 0;
 
-    // ror (20-bar)
-    const refIdx = Math.max(0, i - 20);
-    const rorRaw = closes[refIdx] > 0 ? (closes[i] - closes[refIdx]) / closes[refIdx] * 100 : 0;
-    const ror = Math.max(-50, Math.min(50, rorRaw * 2));
+    // ror: 144-bar rate of return — clamped ±80
+    const rorIdx = Math.max(0, i - 144);
+    const rorRef = closes[rorIdx];
+    const ror = rorRef > 0 ? Math.max(-80, Math.min(80, (closes[i] - rorRef) / rorRef * 100)) : 0;
 
-    // moneyFlow (MFI 14-bar)
-    const mfStart = Math.max(0, i - 14);
-    let posFlow = 0, negFlow = 0;
-    for (let j = mfStart + 1; j <= i; j++) {
-      const tp = (bars[j].high + bars[j].low + bars[j].close) / 3;
-      const prevTp = (bars[j-1].high + bars[j-1].low + bars[j-1].close) / 3;
-      const rawMf = tp * (bars[j].volume || 0);
-      if (tp > prevTp) posFlow += rawMf;
-      else if (tp < prevTp) negFlow += rawMf;
-    }
-    const mfi = negFlow > 0 ? 100 - 100 / (1 + posFlow / negFlow) : (posFlow > 0 ? 100 : 50);
-    const moneyFlow = Math.max(-50, Math.min(50, (mfi - 50) * 1.2));
+    // moneyFlow: rma(mfRatio * volume, 21) / rma(volume, 21) * 100
+    const b = bars[i];
+    const range = b.high - b.low;
+    const mfRatio = range > 0 ? (2 * b.close - b.low - b.high) / range : 0;
+    const mfVal = mfRatio * (b.volume || 0);
+    mfRMA = mfRMA != null ? updateRMA(mfRMA, mfVal, 21) : mfVal;
+    volRMA = volRMA != null ? updateRMA(volRMA, b.volume || 0, 21) : (b.volume || 0);
+    const rawMF = (volRMA > 1e-8) ? (mfRMA / volRMA) * 100 : 0;
+    const moneyFlow = Number.isFinite(rawMF) ? Math.max(-100, Math.min(100, rawMF)) : 0;
 
-    // vix (ATR 14-bar)
+    // vix: ATR-based proxy — clamped [-60, +30]
     let atrSum = 0;
     for (let j = Math.max(0, i - 13); j <= i; j++) {
       atrSum += bars[j].high - bars[j].low;
     }
     const atr = atrSum / 14;
     const atrPct = closes[i] > 0 ? (atr / closes[i]) * 100 : 0;
-    const vixProxy = Math.max(-50, Math.min(20, -(atrPct - 1.5) * 10));
+    const vixProxy = Math.max(-60, Math.min(30, -(atrPct - 1.5) * 10));
 
-    // Composite (equal weight, gold=0 for historical)
-    const fgScore = Math.max(-60, Math.min(60, r2((pmacd + ror + moneyFlow + vixProxy + 0) / 5)));
+    // Guard all components
+    const safePmacd = Number.isFinite(pmacd) ? pmacd : 0;
+    const safeRor = Number.isFinite(ror) ? ror : 0;
+    const safeMF = Number.isFinite(moneyFlow) ? moneyFlow : 0;
+    const safeVix = Number.isFinite(vixProxy) ? vixProxy : 0;
+
+    // Composite: DGT weights (1.0, 1.0, 1.0, 1.2, 0.8) / 5.0, gold=0 for historical
+    const raw = (safePmacd * 1.0 + safeRor * 1.0 + safeMF * 1.0 + safeVix * 1.2 + 0 * 0.8) / 5.0;
+    // RMA(5) smoothing
+    fgRMA = fgRMA != null ? updateRMA(fgRMA, raw, 5) : raw;
+    const fgScore = Math.max(-80, Math.min(100, r2(fgRMA)));
     const { zone, severity } = classifyZone(fgScore);
 
     series.push({

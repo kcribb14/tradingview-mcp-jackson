@@ -1,0 +1,151 @@
+{
+  "timestamp": "2026-04-05T06:23:11.923Z",
+  "totalSymbols": 94,
+  "totalEvents": 57,
+  "totalBars": 29179,
+  "overall": {
+    "avgReturn30d": null,
+    "winRate": 60,
+    "sharpe": 0,
+    "tstat": 0,
+    "significant": false
+  },
+  "perClass": {
+    "US_LARGE_CAP": {
+      "symbols": 9,
+      "events": 0,
+      "avgReturn30d": null,
+      "winRate": null,
+      "sharpe": null,
+      "tstat": null,
+      "significant": false,
+      "pctl10": 8.06,
+      "pctl25": 13.05,
+      "pctl75": 17.82,
+      "pctl90": 19.06,
+      "fgRange": [
+        -10.8,
+        26.69
+      ]
+    },
+    "US_MID_SMALL": {
+      "symbols": 25,
+      "events": 21,
+      "avgReturn30d": 5.45,
+      "winRate": 52,
+      "sharpe": 0.36,
+      "tstat": 0.56,
+      "significant": false,
+      "pctl10": -44.65,
+      "pctl25": -37.77,
+      "pctl75": 2.22,
+      "pctl90": 13.38,
+      "fgRange": [
+        -51.62,
+        22.18
+      ]
+    },
+    "ASX_MINING_MID": {
+      "symbols": 11,
+      "events": 7,
+      "avgReturn30d": 358.31,
+      "winRate": 100,
+      "sharpe": 3.86,
+      "tstat": 3.53,
+      "significant": true,
+      "pctl10": -30.51,
+      "pctl25": -13.19,
+      "pctl75": 12.35,
+      "pctl90": 14.7,
+      "fgRange": [
+        -45.79,
+        23.78
+      ]
+    },
+    "ASX_MINING_MICRO": {
+      "symbols": 13,
+      "events": 11,
+      "avgReturn30d": null,
+      "winRate": 45,
+      "sharpe": null,
+      "tstat": null,
+      "significant": false,
+      "pctl10": -45.54,
+      "pctl25": -42.03,
+      "pctl75": -5.4,
+      "pctl90": 11.67,
+      "fgRange": [
+        -55.39,
+        18.41
+      ]
+    },
+    "CRYPTO_MAJOR": {
+      "symbols": 6,
+      "events": 3,
+      "avgReturn30d": 289.92,
+      "winRate": 67,
+      "sharpe": 3.24,
+      "tstat": 1.94,
+      "significant": false,
+      "pctl10": -17.61,
+      "pctl25": -7.88,
+      "pctl75": 12.74,
+      "pctl90": 15.98,
+      "fgRange": [
+        -37.29,
+        19.53
+      ]
+    },
+    "CRYPTO_MID": {
+      "symbols": 12,
+      "events": 9,
+      "avgReturn30d": 79.76,
+      "winRate": 56,
+      "sharpe": 1.3,
+      "tstat": 1.35,
+      "significant": false,
+      "pctl10": -40.48,
+      "pctl25": -31.96,
+      "pctl75": -4.5,
+      "pctl90": 10.23,
+      "fgRange": [
+        -51.93,
+        19.5
+      ]
+    },
+    "COMMODITIES": {
+      "symbols": 6,
+      "events": 2,
+      "avgReturn30d": 33.09,
+      "winRate": 50,
+      "sharpe": 1.88,
+      "tstat": 0.92,
+      "significant": false,
+      "pctl10": -24.66,
+      "pctl25": -16.87,
+      "pctl75": 1.28,
+      "pctl90": 12.56,
+      "fgRange": [
+        -38.75,
+        23.03
+      ]
+    },
+    "ETFS": {
+      "symbols": 12,
+      "events": 4,
+      "avgReturn30d": 52.96,
+      "winRate": 75,
+      "sharpe": 1.68,
+      "tstat": 1.16,
+      "significant": false,
+      "pctl10": -22.15,
+      "pctl25": -6.7,
+      "pctl75": 18.67,
+      "pctl90": 22.19,
+      "fgRange": [
+        -46,
+        28.42
+      ]
+    }
+  }
+}

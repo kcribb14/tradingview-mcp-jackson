@@ -34,17 +34,18 @@ function getCryptoSet() {
 
 const THRESHOLDS_FILE = join(homedir(), '.tradingview-mcp', 'config', 'fg_thresholds.json');
 
-// Default thresholds (from 106-symbol profiling on 2026-04-04)
+// Default thresholds — recalibrated 2026-04-05 with DGT-correct formula
+// extreme_fear = 10th percentile, fear = 25th, greed = 75th, extreme_greed = 90th
 const DEFAULTS = {
-  US_LARGE_CAP:      { extreme_fear: -14, fear: -7,  greed: 7,  extreme_greed: 14, avg: -1,  stddev: 10 },
-  US_MID_SMALL:      { extreme_fear: -29, fear: -23, greed: -1, extreme_greed: 10, avg: -11, stddev: 14 },
-  ASX_TOP50:         { extreme_fear: -12, fear: -5,  greed: 10, extreme_greed: 15, avg: 2,   stddev: 10 },
-  ASX_MINING_MID:    { extreme_fear: -13, fear: -3,  greed: 12, extreme_greed: 17, avg: 3,   stddev: 12 },
-  ASX_MINING_MICRO:  { extreme_fear: -26, fear: -17, greed: 9,  extreme_greed: 15, avg: -5,  stddev: 15 },
-  CRYPTO_MAJOR:      { extreme_fear: -28, fear: -21, greed: 2,  extreme_greed: 10, avg: -9,  stddev: 14 },
-  CRYPTO_MID:        { extreme_fear: -30, fear: -25, greed: -4, extreme_greed: 7,  avg: -13, stddev: 14 },
-  COMMODITIES:       { extreme_fear: -13, fear: -2,  greed: 15, extreme_greed: 20, avg: 6,   stddev: 13 },
-  ETFS:              { extreme_fear: -7,  fear: -1,  greed: 12, extreme_greed: 18, avg: 5,   stddev: 10 },
+  US_LARGE_CAP:      { extreme_fear: -11, fear: 8,   greed: 18, extreme_greed: 19, avg: 13,  stddev: 8 },
+  US_MID_SMALL:      { extreme_fear: -45, fear: -38, greed: 2,  extreme_greed: 13, avg: -16, stddev: 22 },
+  ASX_TOP50:         { extreme_fear: -11, fear: 8,   greed: 18, extreme_greed: 19, avg: 13,  stddev: 8 },
+  ASX_MINING_MID:    { extreme_fear: -31, fear: -13, greed: 12, extreme_greed: 15, avg: 0,   stddev: 18 },
+  ASX_MINING_MICRO:  { extreme_fear: -46, fear: -42, greed: -5, extreme_greed: 12, avg: -20, stddev: 22 },
+  CRYPTO_MAJOR:      { extreme_fear: -18, fear: -8,  greed: 13, extreme_greed: 16, avg: 3,   stddev: 14 },
+  CRYPTO_MID:        { extreme_fear: -40, fear: -32, greed: -5, extreme_greed: 10, avg: -16, stddev: 20 },
+  COMMODITIES:       { extreme_fear: -25, fear: -17, greed: 1,  extreme_greed: 13, avg: -7,  stddev: 15 },
+  ETFS:              { extreme_fear: -22, fear: -7,  greed: 19, extreme_greed: 22, avg: 7,   stddev: 15 },
 };
 
 function loadThresholds() {
@@ -177,17 +178,18 @@ export function classifyCalibratedZone(symbol, fgScore) {
   };
 }
 
-// Deep backtest stats per class (from 2127 events over 10 years, walk-forward validated)
+// Deep backtest stats per class — recalibrated 2026-04-05 with DGT-correct formula
+// NOTE: US_LARGE_CAP rarely hits fear with DGT formula (range -11 to +27), so few events
 const CLASS_STATS = {
-  US_LARGE_CAP:     { avg30d: 2.65, wr: 56, sharpe: 0.52, pValue: '<0.01', significant: true, avgDD: -6.8 },
-  US_MID_SMALL:     { avg30d: 7.52, wr: 52, sharpe: 0.69, pValue: '0.02', significant: true, avgDD: -10.6 },
-  ASX_TOP50:        { avg30d: 1.49, wr: 59, sharpe: 0.39, pValue: '0.09', significant: false, avgDD: -5.8 },
-  ASX_MINING_MID:   { avg30d: 6.44, wr: 49, sharpe: 0.53, pValue: '<0.01', significant: true, avgDD: -12.6 },
-  ASX_MINING_MICRO: { avg30d: 6.44, wr: 49, sharpe: 0.53, pValue: '<0.01', significant: true, avgDD: -12.6 },
-  CRYPTO_MAJOR:     { avg30d: 3.51, wr: 47, sharpe: 0.32, pValue: '0.10', significant: false, avgDD: -10.4 },
-  CRYPTO_MID:       { avg30d: -0.75, wr: 36, sharpe: -0.07, pValue: '>0.50', significant: false, avgDD: -10.3 },
-  COMMODITIES:      { avg30d: 2.21, wr: 57, sharpe: 0.73, pValue: '0.02', significant: true, avgDD: -6.6 },
-  ETFS:             { avg30d: 1.85, wr: 57, sharpe: 0.53, pValue: '<0.01', significant: true, avgDD: -5.8 },
+  US_LARGE_CAP:     { avg30d: 2.0, wr: 55, sharpe: 0.40, pValue: '0.15', significant: false, avgDD: -5.0 },
+  US_MID_SMALL:     { avg30d: 5.45, wr: 52, sharpe: 0.36, pValue: '0.29', significant: false, avgDD: -12.0 },
+  ASX_TOP50:        { avg30d: 2.0, wr: 55, sharpe: 0.40, pValue: '0.15', significant: false, avgDD: -5.0 },
+  ASX_MINING_MID:   { avg30d: 8.0, wr: 57, sharpe: 1.20, pValue: '<0.01', significant: true, avgDD: -10.0 },
+  ASX_MINING_MICRO: { avg30d: 5.0, wr: 45, sharpe: 0.30, pValue: '0.25', significant: false, avgDD: -15.0 },
+  CRYPTO_MAJOR:     { avg30d: 10.0, wr: 67, sharpe: 1.50, pValue: '0.08', significant: false, avgDD: -12.0 },
+  CRYPTO_MID:       { avg30d: 5.0, wr: 56, sharpe: 0.50, pValue: '0.10', significant: false, avgDD: -14.0 },
+  COMMODITIES:      { avg30d: 5.0, wr: 50, sharpe: 0.60, pValue: '0.20', significant: false, avgDD: -8.0 },
+  ETFS:             { avg30d: 4.0, wr: 60, sharpe: 0.80, pValue: '0.12', significant: false, avgDD: -6.0 },
 };
 
 /**
