@@ -9,7 +9,7 @@ import compression from 'compression';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { loadCache } from '../core/fg_cache.js';
+import { loadCache, saveCache as _saveCache } from '../core/fg_cache.js';
 import { detectAssetClass, classifyCalibratedZone } from '../core/fg_calibrated.js';
 import { loadDexTokens } from '../core/dex_universe.js';
 
@@ -248,91 +248,141 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ─── History endpoint ───────────────────────────────────────────────────────
+// ─── Shared OHLCV fetcher (used by history endpoint + background worker) ────
+
+const YAHOO_RANGES = { '15': { range: '5d', interval: '15m' }, '60': { range: '1mo', interval: '1h' }, '240': { range: '6mo', interval: '1d' }, 'D': { range: '2y', interval: '1d' }, 'W': { range: '10y', interval: '1wk' } };
+const BINANCE_INTERVALS = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
+
+async function fetchBars(sym, tf) {
+  const { detectAssetClass } = await import('../core/fg_calibrated.js');
+  const cls = detectAssetClass(sym);
+  const isCrypto = cls.includes('CRYPTO');
+
+  if (isCrypto) {
+    try {
+      let pair = sym.replace(/[-\/]/g, '').toUpperCase();
+      if (!pair.endsWith('USDT') && !pair.endsWith('USD')) pair += 'USDT';
+      const bi = BINANCE_INTERVALS[tf] || '1d';
+      const limit = (tf === 'D' || tf === 'W') ? 500 : 200;
+      const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=${limit}`, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d) && d.length >= 20)
+          return d.map(b => ({ time: Math.floor(b[0] / 1000), open: +b[1], high: +b[2], low: +b[3], close: +b[4], volume: +b[5] || 0 }));
+      }
+    } catch {}
+  }
+  try {
+    const cfg = YAHOO_RANGES[tf] || YAHOO_RANGES['D'];
+    let ticker = sym;
+    if (isCrypto && !ticker.includes('-')) ticker += '-USD';
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${cfg.range}&interval=${cfg.interval}&includePrePost=false`, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const d = await r.json();
+      const chart = d?.chart?.result?.[0];
+      if (chart?.timestamp) {
+        const q = chart.indicators.quote[0];
+        const bars = [];
+        for (let i = 0; i < chart.timestamp.length; i++)
+          if (q.close[i] != null && q.open[i] != null)
+            bars.push({ time: chart.timestamp[i], open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i], volume: q.volume[i] || 0 });
+        if (bars.length >= 20) return bars;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Cache the latest F&G score from a time series into the scores cache
+function cacheScore(sym, tf, series, bars) {
+  if (!series || series.length === 0) return;
+  const last = series[series.length - 1];
+  const cache = loadCache();
+  const key = `${sym}:${tf}`;
+  cache[key] = {
+    lastScanTime: new Date().toISOString(),
+    fgScore: Math.max(-80, Math.min(100, Math.round(last.fg_score * 100) / 100)),
+    zone: last.zone,
+    lastClose: last.close,
+    barCount: bars.length,
+  };
+  _saveCache(cache);
+}
+
+// Track recently viewed symbols for background worker
+const recentViews = new Set();
+
+// ─── History endpoint (on-demand fetch + cache) ─────────────────────────────
 
 app.get('/api/history/:symbol', async (req, res) => {
   try {
     const sym = req.params.symbol;
-    const tf = req.query.tf || 'D'; // D, 60, 240, 15, W
+    const tf = req.query.tf || 'D';
+    recentViews.add(sym);
+
     const { computeTimeSeries } = await import('../core/fg_backtest.js');
-
-    // Determine fetch function and params based on timeframe
-    const yahooRanges = { '15': { range: '5d', interval: '15m' }, '60': { range: '1mo', interval: '1h' }, '240': { range: '6mo', interval: '1d' }, 'D': { range: '2y', interval: '1d' }, 'W': { range: '10y', interval: '1wk' } };
-    const binanceIntervals = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
-
-    const { detectAssetClass } = await import('../core/fg_calibrated.js');
-    const cls = detectAssetClass(sym);
-    const isCrypto = cls.includes('CRYPTO');
-
-    let bars = null;
-
-    if (isCrypto) {
-      // Try Binance first for crypto
-      try {
-        let pair = sym.replace(/[-\/]/g, '').toUpperCase();
-        if (!pair.endsWith('USDT') && !pair.endsWith('USD')) pair += 'USDT';
-        const bi = binanceIntervals[tf] || '1d';
-        const limit = (tf === 'D' || tf === 'W') ? 500 : 200;
-        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${bi}&limit=${limit}`, { signal: AbortSignal.timeout(5000) });
-        if (r.ok) {
-          const d = await r.json();
-          if (Array.isArray(d) && d.length >= 20) {
-            bars = d.map(b => ({ time: Math.floor(b[0] / 1000), open: +b[1], high: +b[2], low: +b[3], close: +b[4], volume: +b[5] || 0 }));
-          }
-        }
-      } catch {}
-    }
-
-    if (!bars) {
-      // Yahoo Finance for stocks + fallback
-      try {
-        const cfg = yahooRanges[tf] || yahooRanges['D'];
-        let ticker = sym;
-        if (isCrypto && !ticker.includes('-')) ticker = ticker + '-USD';
-        const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${cfg.range}&interval=${cfg.interval}&includePrePost=false`, { signal: AbortSignal.timeout(5000) });
-        if (r.ok) {
-          const d = await r.json();
-          const chart = d?.chart?.result?.[0];
-          if (chart?.timestamp) {
-            const q = chart.indicators.quote[0];
-            bars = [];
-            for (let i = 0; i < chart.timestamp.length; i++) {
-              if (q.close[i] != null && q.open[i] != null) {
-                bars.push({ time: chart.timestamp[i], open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i], volume: q.volume[i] || 0 });
-              }
-            }
-          }
-        }
-      } catch {}
-    }
-
+    const bars = await fetchBars(sym, tf);
     if (!bars || bars.length < 30) return res.json({ error: 'No ' + tf + ' data for ' + sym, tf });
 
     const series = computeTimeSeries(bars);
     if (series.length === 0 && bars.length >= 30) {
-      // computeTimeSeries needs 150 bars — for short series, do inline calc
       const ohlcv = bars.map(b => ({ t: b.time * 1000, o: Math.round(b.open * 1e4) / 1e4, h: Math.round(b.high * 1e4) / 1e4, l: Math.round(b.low * 1e4) / 1e4, c: Math.round(b.close * 1e4) / 1e4 }));
       return res.json({ symbol: sym, tf, bars: ohlcv.length, ohlcv, fg: [], current: { price: bars[bars.length - 1].close } });
     }
+
+    // Cache the score for the table
+    cacheScore(sym, tf, series, bars);
 
     const slicedBars = bars.slice(-series.length);
     const ohlcv = slicedBars.map(b => ({ t: b.time * 1000, o: Math.round(b.open * 1e4) / 1e4, h: Math.round(b.high * 1e4) / 1e4, l: Math.round(b.low * 1e4) / 1e4, c: Math.round(b.close * 1e4) / 1e4 }));
     const fg = series.map(s => ({ t: new Date(s.date).getTime(), v: Math.max(-80, Math.min(100, Math.round(s.fg_score * 10) / 10)) }));
     const last = series[series.length - 1];
-    res.json({ symbol: sym, tf, bars: ohlcv.length, ohlcv, fg, current: { fg: last?.fg_score, zone: last?.zone, price: ohlcv[ohlcv.length - 1]?.c } });
+    res.json({ symbol: sym, tf, bars: ohlcv.length, ohlcv, fg, cached: false, current: { fg: last?.fg_score, zone: last?.zone, price: ohlcv[ohlcv.length - 1]?.c } });
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
-// Available timeframes for a symbol
-// All TFs are available via live fetch; cached flag indicates pre-computed data exists
+// Lightweight on-demand fetch: just cache the score and return it
+app.get('/api/fetch-and-cache/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const tf = req.query.tf || 'D';
+    recentViews.add(sym);
+
+    // Check cache freshness
+    const cache = loadCache();
+    const key = `${sym}:${tf}`;
+    const TTL = { '15': 30 * 60e3, '60': 2 * 3600e3, '240': 8 * 3600e3, 'D': 24 * 3600e3, 'W': 7 * 24 * 3600e3 };
+    const entry = cache[key];
+    if (entry?.fgScore != null && entry.lastScanTime) {
+      const age = Date.now() - new Date(entry.lastScanTime).getTime();
+      if (age < (TTL[tf] || 24 * 3600e3)) {
+        return res.json({ symbol: sym, tf, fg: entry.fgScore, zone: entry.zone, price: entry.lastClose, cached: true });
+      }
+    }
+
+    const { computeTimeSeries } = await import('../core/fg_backtest.js');
+    const bars = await fetchBars(sym, tf);
+    if (!bars || bars.length < 30) return res.json({ error: 'No data', tf });
+    const series = computeTimeSeries(bars);
+    if (series.length > 0) {
+      cacheScore(sym, tf, series, bars);
+      const last = series[series.length - 1];
+      return res.json({ symbol: sym, tf, fg: Math.max(-80, Math.min(100, Math.round(last.fg_score * 10) / 10)), zone: last.zone, price: last.close, cached: false });
+    }
+    res.json({ error: 'Insufficient data', tf });
+  } catch (e) { res.json({ error: e.message?.slice(0, 80) }); }
+});
+
+// Available timeframes — report cached freshness
 app.get('/api/available-tfs/:symbol', (req, res) => {
   const sym = req.params.symbol;
-  const tfs = ['15', '60', '240', 'D', 'W'];
   const cache = loadCache();
+  const TTL = { '15': 30 * 60e3, '60': 2 * 3600e3, '240': 8 * 3600e3, 'D': 24 * 3600e3, 'W': 7 * 24 * 3600e3 };
   const available = {};
-  for (const tf of tfs) {
-    // All TFs available via live Binance/Yahoo fetch in /api/history
-    available[tf] = true;
+  for (const tf of ['15', '60', '240', 'D', 'W']) {
+    const entry = cache[`${sym}:${tf}`];
+    const fresh = entry?.lastScanTime && (Date.now() - new Date(entry.lastScanTime).getTime()) < (TTL[tf] || 86400e3);
+    available[tf] = { fetchable: true, cached: !!entry?.fgScore, fresh };
   }
   res.json({ symbol: sym, available });
 });
@@ -373,18 +423,14 @@ app.get('/api/discover', async (req, res) => {
   try {
     const { discoverTokens } = await import('../core/dex_universe.js');
     const result = await discoverTokens();
-    rebuildData(); // Refresh after discovery
+    rebuildData();
     res.json(result);
   } catch (e) { res.json({ error: e.message }); }
 });
 
-app.get('/api/refresh-dex', async (req, res) => {
-  try {
-    const { refreshDexScores } = await import('../core/dex_universe.js');
-    const result = await refreshDexScores();
-    rebuildData(); // Refresh dashboard data after score update
-    res.json(result);
-  } catch (e) { res.json({ error: e.message }); }
+// Worker status endpoint
+app.get('/api/worker-status', (req, res) => {
+  res.json(workerStatus);
 });
 
 app.post('/api/open-in-tv', async (req, res) => {
@@ -399,6 +445,89 @@ app.post('/api/open-in-tv', async (req, res) => {
 
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
 
+// ─── Background Worker ──────────────────────────────────────────────────────
+
+const workerStatus = { state: 'idle', current: null, warmed: 0, total: 0, errors: 0 };
+const TF_TTL = { '15': 30 * 60e3, '60': 2 * 3600e3, '240': 8 * 3600e3, 'D': 24 * 3600e3, 'W': 7 * 24 * 3600e3 };
+const TOP_100 = new Set(['BTC','ETH','SOL','XRP','BNB','DOGE','ADA','AVAX','DOT','LINK','SHIB','UNI','AAVE','LTC','NEAR',
+  'ATOM','FTM','APT','ARB','OP','SUI','SEI','INJ','PEPE','AAPL','MSFT','GOOG','AMZN','NVDA','META','TSLA','JPM','V',
+  'UNH','XOM','MA','HD','PG','JNJ','NFLX','BAC','CRM','AMD','COST','ORCL','KO','PEP','DIS','BA','WMT','SPY','QQQ',
+  'GLD','GC=F','SI=F','CL=F','BHP.AX','RIO.AX','CBA.AX','CSL.AX','FMG.AX','NST.AX','EVN.AX','PLS.AX','DEV.AX',
+  'IWM','DIA','ARKK','GDX','SLV','TLT','XLK','XLF','XLE','SOFI','PLTR','COIN','CRWD','SHOP','SNOW','DKNG',
+  'MARA','RIOT','HOOD','SQ','NET','ABNB','RBLX','ZM','ROKU','PINS','SNAP','DASH','COIN','U','LYFT']);
+
+async function bgWorkerLoop() {
+  const { computeTimeSeries } = await import('../core/fg_backtest.js');
+
+  // Build priority queue
+  function buildQueue() {
+    const cache = loadCache();
+    const now = Date.now();
+    const queue = [];
+    const allTFs = ['D', '60', '240', '15', 'W'];
+
+    // Priority 1: Watchlist × all TFs
+    for (const sym of FAVS) for (const tf of allTFs) queue.push({ sym, tf, pri: 1 });
+    // Priority 2: Top 100 × all TFs
+    for (const sym of TOP_100) for (const tf of allTFs) queue.push({ sym, tf, pri: 2 });
+    // Priority 3: Recently viewed × all TFs
+    for (const sym of recentViews) for (const tf of allTFs) queue.push({ sym, tf, pri: 3 });
+
+    // Deduplicate and filter out fresh entries
+    const seen = new Set();
+    return queue.filter(item => {
+      const key = `${item.sym}:${item.tf}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const entry = cache[key];
+      if (entry?.lastScanTime) {
+        const age = now - new Date(entry.lastScanTime).getTime();
+        if (age < (TF_TTL[item.tf] || 86400e3)) return false; // Still fresh
+      }
+      return true;
+    }).sort((a, b) => a.pri - b.pri);
+  }
+
+  while (true) {
+    const queue = buildQueue();
+    workerStatus.total = queue.length;
+    workerStatus.warmed = 0;
+    workerStatus.errors = 0;
+
+    if (queue.length === 0) {
+      workerStatus.state = 'idle';
+      workerStatus.current = null;
+      await new Promise(r => setTimeout(r, 60000)); // Sleep 1 min when nothing to do
+      continue;
+    }
+
+    workerStatus.state = 'running';
+    for (const item of queue) {
+      workerStatus.current = `${item.sym}:${item.tf}`;
+      try {
+        const bars = await fetchBars(item.sym, item.tf);
+        if (bars && bars.length >= 30) {
+          const series = computeTimeSeries(bars);
+          if (series.length > 0) {
+            cacheScore(item.sym, item.tf, series, bars);
+            workerStatus.warmed++;
+          }
+        }
+      } catch { workerStatus.errors++; }
+
+      if (workerStatus.warmed % 50 === 0 && workerStatus.warmed > 0) {
+        console.log(`Background: warmed ${workerStatus.warmed}/${queue.length} (${workerStatus.errors} errors)`);
+        rebuildData(); // Refresh dashboard data periodically
+      }
+      await new Promise(r => setTimeout(r, 1200)); // Rate limit: ~50/min
+    }
+
+    console.log(`Background cycle done: ${workerStatus.warmed} warmed, ${workerStatus.errors} errors`);
+    rebuildData();
+    await new Promise(r => setTimeout(r, 30000)); // 30s pause between cycles
+  }
+}
+
 // ─── Start ──────────────────────────────────────────────────────────────────
 
 rebuildData();
@@ -408,4 +537,9 @@ app.listen(PORT, () => {
   const mem = process.memoryUsage();
   console.log(`F&G Dashboard: http://localhost:${PORT}`);
   console.log(`Symbols: ${DATA.stats.total} | Memory: ${Math.round(mem.heapUsed / 1e6)}MB`);
+  // Start background worker after 10s delay
+  setTimeout(() => {
+    console.log('Background worker starting...');
+    bgWorkerLoop().catch(e => console.error('Worker error:', e.message));
+  }, 10000);
 });

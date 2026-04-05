@@ -144,6 +144,11 @@ function render(){
   renderSidebar();renderTFBar();renderCatBar();renderTable();
   document.getElementById('statusBar').textContent=
     'Connected | '+(s.total||0)+' symbols | Updated: '+(D.updated?new Date(D.updated).toLocaleTimeString():'never');
+  // Update worker status
+  fetch('/api/worker-status').then(r=>r.json()).then(w=>{
+    const wt=w.state==='running'?'Worker: '+w.current+' ('+w.warmed+'/'+w.total+')':'Worker: idle';
+    document.getElementById('statusBar').textContent+=' | '+wt;
+  }).catch(()=>{});
 }
 
 function renderSidebar(){
@@ -404,12 +409,13 @@ function renderTFButtons(){
   const el=document.getElementById('dmTFButtons');
   el.innerHTML=['15','60','240','D','W'].map(tf=>{
     const active=tf===dmTF;
-    const avail=dmAvailTFs[tf];
+    const info=dmAvailTFs[tf]||{};
+    const cached=info.cached;
     return'<button class="btn" style="font-size:10px;padding:2px 6px;min-width:32px;'
       +(active?'background:#f0b90b;color:#0b0e11;':'')
-      +(!avail&&!active?'opacity:0.35;cursor:default;':'')
+      +(!cached&&!active?'border:1px dashed #333;':'')
       +'" onclick="switchTF(\''+tf+'\')"'
-      +(!avail&&!active?' title="No data"':'')
+      +(!cached?' title="Will fetch on click"':'')
       +'>'+TF_LABELS[tf]+'</button>';
   }).join('');
 }
@@ -422,6 +428,11 @@ async function switchTF(tf){
 
 async function loadFGChart(sym,tf){
   const canvas=document.getElementById('dmFGChart');
+  // Show loading state
+  if(dmFGChart){dmFGChart.destroy();dmFGChart=null}
+  const ctx2=canvas.getContext('2d');ctx2.clearRect(0,0,canvas.width,canvas.height);
+  ctx2.fillStyle='#848e9c';ctx2.font='12px sans-serif';ctx2.textAlign='center';
+  ctx2.fillText('Loading '+TF_LABELS[tf]+' data...',canvas.width/2,canvas.height/2);
   try{
     const r=await fetch('/api/history/'+encodeURIComponent(sym)+'?tf='+tf);
     const d=await r.json();
