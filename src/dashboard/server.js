@@ -62,7 +62,7 @@ function estimateMcap(sym, price) {
 function rebuildData() {
   try {
     const cache = loadCache();
-    const rows = [];
+    let rows = [];
 
     for (const [key, entry] of Object.entries(cache)) {
       if (!key.endsWith(':D') || entry?.fgScore == null) continue;
@@ -86,29 +86,46 @@ function rebuildData() {
       const tier = ['US_LARGE_CAP','ASX_MINING_MID','ASX_MINING_MICRO','COMMODITIES'].includes(cls) ? 1 :
         ['US_MID_SMALL','ETFS','ASX_TOP50','CRYPTO_MAJOR'].includes(cls) ? 2 : 3;
 
+      // Clamp all F&G scores to safe range
+      const clamp = v => v != null ? Math.max(-80, Math.min(100, Math.round(v * 10) / 10)) : null;
       rows.push({
-        s: sym, f: Math.round(fg * 10) / 10, z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
+        s: sym, f: clamp(fg), z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
         r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null,
-        f1: cache[sym + ':15']?.fgScore != null ? Math.round(cache[sym + ':15'].fgScore * 10) / 10 : null,
-        fh: cache[sym + ':60']?.fgScore != null ? Math.round(cache[sym + ':60'].fgScore * 10) / 10 : null,
-        f4: cache[sym + ':240']?.fgScore != null ? Math.round(cache[sym + ':240'].fgScore * 10) / 10 : null,
-        fw: cache[sym + ':W']?.fgScore != null ? Math.round(cache[sym + ':W'].fgScore * 10) / 10 : null,
+        f1: clamp(cache[sym + ':15']?.fgScore),
+        fh: clamp(cache[sym + ':60']?.fgScore),
+        f4: clamp(cache[sym + ':240']?.fgScore),
+        fw: clamp(cache[sym + ':W']?.fgScore),
       });
+      const last = rows[rows.length - 1];
+      last.spark = [last.f1, last.fh, last.f4, last.f, last.fw].filter(v => v != null);
     }
 
-    // Add DEX tokens
+    // Add DEX tokens (clamp scores to safe range)
     const seenSyms = new Set(rows.map(r => r.s));
-    for (const token of loadDexTokens()) {
-      if (seenSyms.has(token.symbol)) continue;
+    const dexTokens = loadDexTokens().filter(t => !seenSyms.has(t.symbol));
+
+    // Count tokens per chain to decide which get their own category
+    const chainCounts = {};
+    for (const token of dexTokens) {
+      const chain = (token.chain || '').toLowerCase();
+      chainCounts[chain] = (chainCounts[chain] || 0) + 1;
+    }
+
+    for (const token of dexTokens) {
       seenSyms.add(token.symbol);
-      const cat = 'DEX ' + (token.chain || '').charAt(0).toUpperCase() + (token.chain || '').slice(1);
+      const fg = Math.max(-80, Math.min(100, Math.round((token.fg ?? 0) * 10) / 10));
+      const chain = (token.chain || '').toLowerCase();
+      const chainLabel = chain.charAt(0).toUpperCase() + chain.slice(1);
+      const cat = chainCounts[chain] >= 10 ? 'DEX ' + chainLabel : 'DEX Other';
       rows.push({
-        s: token.symbol, f: Math.round((token.fg ?? 0) * 10) / 10, z: token.zone || 'Balanced',
+        s: token.symbol, f: fg, z: token.zone || 'Balanced',
         c: cat, t: 3, w: '', p: token.price || 0, m: token.mcap || 1e6,
-        r: null, f1: null, fh: null, f4: null, fw: null,
+        r: null, f1: null, fh: null, f4: null, fw: null, spark: [],
       });
     }
 
+    // Server-side safety net: filter out any scores outside [-80, +100]
+    rows = rows.filter(r => r.f >= -80 && r.f <= 100);
     rows.sort((a, b) => a.f - b.f);
 
     // Stats
@@ -134,7 +151,11 @@ function rebuildData() {
         oversold: rows.filter(r => r.f <= -25).length,
         overbought: rows.filter(r => r.f >= 25).length,
       },
-      categories: Object.entries(cats).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name)),
+      categories: Object.entries(cats).map(([name, count]) => ({ name, count })).sort((a, b) => {
+        const order = ['Crypto Major', 'Crypto Mid', 'US Large Cap', 'US Mid/Small', 'ASX Top 50', 'ASX Mining Mid', 'ASX Mining Micro', 'DEX Solana', 'DEX Ethereum', 'DEX Other', 'Commodities', 'ETFs'];
+        const ai = order.indexOf(a.name), bi = order.indexOf(b.name);
+        return (ai === -1 ? order.length : ai) - (bi === -1 ? order.length : bi);
+      }),
       tfCounts,
       updated: new Date().toISOString(),
     };
@@ -205,7 +226,8 @@ app.get('/api/scatter', (req, res) => {
     const sorted = [...rows].sort((a, b) => a.f - b.f);
     const fear = sorted.slice(0, 250);
     const greed = sorted.slice(-250);
-    const combined = [...new Map([...fear, ...greed].map(r => [r.s, r])).values()];
+    const combined = [...new Map([...fear, ...greed].map(r => [r.s, r])).values()]
+      .filter(r => r.f >= -80 && r.f <= 100); // Safety net
     res.json(combined);
   } catch (e) {
     res.status(500).json([]);
@@ -263,11 +285,29 @@ app.post('/api/add-token', async (req, res) => {
   } catch (e) { res.json({ error: e.message }); }
 });
 
+app.get('/api/refresh-dex', async (req, res) => {
+  try {
+    const { refreshDexScores } = await import('../core/dex_universe.js');
+    const result = await refreshDexScores();
+    rebuildData();
+    res.json(result);
+  } catch (e) { res.json({ error: e.message }); }
+});
+
 app.get('/api/discover', async (req, res) => {
   try {
     const { discoverTokens } = await import('../core/dex_universe.js');
     const result = await discoverTokens();
     rebuildData(); // Refresh after discovery
+    res.json(result);
+  } catch (e) { res.json({ error: e.message }); }
+});
+
+app.get('/api/refresh-dex', async (req, res) => {
+  try {
+    const { refreshDexScores } = await import('../core/dex_universe.js');
+    const result = await refreshDexScores();
+    rebuildData(); // Refresh dashboard data after score update
     res.json(result);
   } catch (e) { res.json({ error: e.message }); }
 });

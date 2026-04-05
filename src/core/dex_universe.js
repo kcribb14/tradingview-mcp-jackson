@@ -58,8 +58,15 @@ function dexFG(pair) {
     if (ageH < 1) ageRisk = -10; else if (ageH < 24) ageRisk = -5; else if (ageH < 168) ageRisk = -2;
   }
 
-  const raw = (pmacd + momentum + volumeFlow + orderFlow + ageRisk) / 5;
-  const score = Math.round(raw * 100) / 100;
+  // Clamp components to prevent tokens with +1000% moves from blowing up the score
+  const cPmacd = Math.max(-60, Math.min(60, pmacd));
+  const cMomentum = Math.max(-40, Math.min(40, momentum));
+  const cVolFlow = Math.max(-30, Math.min(30, volumeFlow));
+  const cOrderFlow = Math.max(-20, Math.min(20, orderFlow));
+
+  const raw = (cPmacd + cMomentum + cVolFlow + cOrderFlow + ageRisk) / 5;
+  // Final clamp to DGT range [-80, +100]
+  const score = Math.max(-80, Math.min(100, Math.round(raw * 100) / 100));
 
   return {
     fg: score,
@@ -260,6 +267,64 @@ function countBy(arr, key) {
   const counts = {};
   for (const item of arr) { counts[item[key]] = (counts[item[key]] || 0) + 1; }
   return counts;
+}
+
+// ─── Refresh scores for cached DEX tokens ───────────────────────────────────
+
+export async function refreshDexScores() {
+  ensureDir(join(HOME, '.tradingview-mcp', 'cache'));
+  let cache = {};
+  try { cache = JSON.parse(readFileSync(DEX_CACHE_FILE, 'utf8')); } catch {}
+
+  const entries = Object.entries(cache);
+  if (entries.length === 0) return { success: true, refreshed: 0, total: 0 };
+
+  let refreshed = 0, failed = 0;
+
+  // Process in batches of 5
+  for (let i = 0; i < entries.length; i += 5) {
+    const batch = entries.slice(i, i + 5);
+    const results = await Promise.all(batch.map(async ([key, token]) => {
+      try {
+        const addr = token.address;
+        if (!addr) return null;
+        const data = await dexFetch(`/latest/dex/tokens/${addr}`);
+        const pairs = data?.pairs || [];
+        if (pairs.length === 0) return null;
+        pairs.sort((a, b) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0));
+        const pair = pairs[0];
+        const fg = dexFG(pair);
+        return {
+          key,
+          update: {
+            ...token,
+            price: parseFloat(pair.priceUsd || 0),
+            mcap: pair.marketCap || pair.fdv || 0,
+            volume24h: pair.volume?.h24 || 0,
+            liquidity: pair.liquidity?.usd || 0,
+            buys24h: pair.txns?.h24?.buys || 0,
+            sells24h: pair.txns?.h24?.sells || 0,
+            priceChange: pair.priceChange || {},
+            fg: fg?.fg ?? 0,
+            zone: fg?.zone ?? 'Balanced',
+            components: fg?.components,
+            refreshedAt: new Date().toISOString(),
+          },
+        };
+      } catch { return null; }
+    }));
+
+    for (const r of results) {
+      if (r) { cache[r.key] = r.update; refreshed++; }
+      else { failed++; }
+    }
+
+    // Rate limit: 1.5s between batches
+    if (i + 5 < entries.length) await new Promise(r => setTimeout(r, 1500));
+  }
+
+  writeFileSync(DEX_CACHE_FILE, JSON.stringify(cache));
+  return { success: true, refreshed, failed, total: entries.length };
 }
 
 // ─── Load DEX tokens for dashboard ──────────────────────────────────────────

@@ -142,7 +142,9 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
     mfRMA = mfRMA != null ? updateRMA(mfRMA, mfVal, mfPeriod) : mfVal;
     volRMA = volRMA != null ? updateRMA(volRMA, b.volume || 0, mfPeriod) : (b.volume || 0);
   }
-  const moneyFlow = volRMA > 0 ? (mfRMA / volRMA) * 100 : 0;
+  // Guard: volRMA near zero produces huge values for low-volume tokens
+  const rawMF = (volRMA > 1e-8) ? (mfRMA / volRMA) * 100 : 0;
+  const moneyFlow = Number.isFinite(rawMF) ? Math.max(-100, Math.min(100, rawMF)) : 0;
 
   // ── vix: proxy — deviation of VIX from its EMA ──
   // DGT uses request.security('VIX', ...) which we approximate from globals
@@ -176,14 +178,23 @@ export function computeFGFromBars(bars, state = {}, globals = {}) {
   }
   rsi = calcRSI(avgGain, avgLoss);
 
+  // ── Layer 1: Guard against NaN/Infinity, Layer 2: Component clamps ──
+  // Wide clamps that don't destroy differentiation but catch garbage OHLCV data
+  const safePmacd = Number.isFinite(pmacd) ? Math.max(-60, Math.min(60, pmacd)) : 0;
+  const safeRor = Number.isFinite(ror) ? Math.max(-80, Math.min(80, ror)) : 0;
+  const safeMF = Number.isFinite(moneyFlow) ? Math.max(-100, Math.min(100, moneyFlow)) : 0;
+  const safeVix = Number.isFinite(vixProxy) ? Math.max(-60, Math.min(30, vixProxy)) : 0;
+  const safeGold = Number.isFinite(goldProxy) ? Math.max(-30, Math.min(30, goldProxy)) : 0;
+
   // ── Composite: weighted average → RMA(5) smoothing ──
   // DGT weights: pmacd=1.0, ror=1.0, mf=1.0, vix=1.2, gold=0.8 → total=5.0
-  const components = { pmacd: round(pmacd), ror: round(ror), moneyFlow: round(moneyFlow), vix: round(vixProxy), gold: round(goldProxy) };
-  const raw = (pmacd * 1.0 + ror * 1.0 + moneyFlow * 1.0 + vixProxy * 1.2 + goldProxy * 0.8) / 5.0;
+  const components = { pmacd: round(safePmacd), ror: round(safeRor), moneyFlow: round(safeMF), vix: round(safeVix), gold: round(safeGold) };
+  const raw = (safePmacd * 1.0 + safeRor * 1.0 + safeMF * 1.0 + safeVix * 1.2 + safeGold * 0.8) / 5.0;
   // Apply RMA(5) smoothing on composite
   let fgRMA = state.fgRMA ?? raw;
   fgRMA = updateRMA(fgRMA, raw, 5);
-  const fgScore = round(fgRMA);
+  // Safety clamp: DGT range is approximately -50 to +90, clamp at [-80, +100]
+  const fgScore = Math.max(-80, Math.min(100, round(fgRMA)));
   const { zone, severity } = classifyZone(fgScore);
 
   return {
