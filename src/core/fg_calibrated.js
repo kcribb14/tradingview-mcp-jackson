@@ -15,6 +15,23 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
+// Load CoinGecko universe for dynamic crypto detection
+let _cgSet = null;
+function getCryptoSet() {
+  if (_cgSet) return _cgSet;
+  _cgSet = new Set();
+  try {
+    const file = join(homedir(), '.tradingview-mcp', 'universes', 'crypto_tokens.json');
+    if (existsSync(file)) {
+      const tokens = JSON.parse(readFileSync(file, 'utf8'));
+      for (const t of tokens) {
+        if (t.symbol) _cgSet.add(t.symbol.toUpperCase());
+      }
+    }
+  } catch {}
+  return _cgSet;
+}
+
 const THRESHOLDS_FILE = join(homedir(), '.tradingview-mcp', 'config', 'fg_thresholds.json');
 
 // Default thresholds (from 106-symbol profiling on 2026-04-04)
@@ -73,12 +90,16 @@ export function detectAssetClass(symbol) {
   const base = s.replace(/-USD[T]?$/i, '').replace(/USDT$/i, '');
   if (CRYPTO_MAJORS.has(base)) return 'CRYPTO_MAJOR';
 
-  // Known crypto tokens
+  // Known crypto tokens (hardcoded set + dynamic CoinGecko universe)
   const cryptoTokens = new Set(['AVAX','LINK','DOT','UNI','AAVE','NEAR','ATOM','FTM','ALGO','SAND','HBAR',
     'APT','ARB','OP','SUI','SEI','TIA','INJ','PEPE','WLD','FET','RNDR','GRT','MKR','CRV','COMP','SNX',
     'LDO','RPL','IMX','MANA','AXS','BONK','WIF','JUP','RAY','PYTH','POPCAT','MEW','BOME','ENA',
     'PENDLE','ETHFI','STRK','ZK','ZRO','EIGEN','GRASS','ONDO','LTC','SHIB','MATIC']);
   if (cryptoTokens.has(base)) return 'CRYPTO_MID';
+
+  // Dynamic: check CoinGecko universe (10,000 tokens)
+  const cgSet = getCryptoSet();
+  if (cgSet.has(base) && !s.endsWith('.AX') && !s.endsWith('.L') && !s.endsWith('.TO')) return 'CRYPTO_MID';
 
   // ETFs
   const etfs = new Set(['SPY','QQQ','DIA','IWM','VOO','VTI','ARKK','GDX','GDXJ','SIL','URA','LIT','PICK',
