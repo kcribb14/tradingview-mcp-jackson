@@ -100,6 +100,8 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn" onclick="applyPreset('extreme')">Extreme</button>
   <button class="btn" onclick="applyPreset('entry')">Entry Zones</button>
   <button class="btn" onclick="applyPreset('greed')">Greed</button>
+  <button class="btn" onclick="applyPreset('whale')">🐋 Whale</button>
+  <button class="btn" onclick="applyPreset('smart')">🎯 Smart 60+</button>
   <button class="btn" onclick="applyPreset('clear')">Clear</button>
 </div>
 <!-- Scanner view (default) -->
@@ -147,6 +149,7 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
         <button class="dm-close" onclick="closeDM()">✕</button>
       </div>
     </div>
+    <div id="dmOnchain" style="display:none;padding:4px 12px;font-size:10px;color:#848e9c;border-bottom:1px solid #2b2f36;display:flex;gap:12px;flex-wrap:wrap"></div>
     <div class="dm-top" id="dmTop"><div id="tvContainer" style="width:100%;height:100%"></div></div>
     <div class="dm-bot"><canvas id="dmFGChart"></canvas></div>
   </div>
@@ -220,10 +223,24 @@ function renderSidebar(){
     '<div class="card-row"><span>Watching</span><span style="color:#f0b90b">'+(sig.watching||0)+'</span></div>'+
     '<div class="card-row"><span>Exit / Take Profit</span><span style="color:#f6465d">'+(sig.exit||0)+'</span></div></div>';
 
+  // Market breadth card
+  const br=s.breadth||{};
+  let brHtml='<div class="card"><div class="card-t">Market Breadth</div>';
+  for(const [g,pct] of Object.entries(br)){
+    const col=pct>=50?'#0ecb81':pct>=30?'#f0b90b':'#f6465d';
+    brHtml+='<div class="card-row"><span>'+g+'</span><span style="color:'+col+';font-weight:600">'+pct+'% above EMA</span></div>';
+  }
+  brHtml+='</div>';
+
+  // Smart money card
+  const smHtml='<div class="card"><div class="card-t">Smart Money</div>'+
+    '<div class="card-row"><span>🐋 Whale Accumulation</span><span style="color:#0ecb81;font-weight:600">'+(s.whaleAcc||0)+'</span></div>'+
+    '<div class="card-row"><span>🎯 Smart Signals (60+)</span><span style="color:#f0b90b;font-weight:600">'+(s.smartSignals||0)+'</span></div></div>';
+
   document.getElementById('sidebar').innerHTML=
     '<div class="card"><div class="card-t">Avg F&G ('+cTF+')</div><div class="card-v" style="color:'+ac+'">'+(avgFG>0?'+':'')+avgFG+'</div>'+
     '<div class="card-bar"><div class="card-bar-bg"></div><div class="card-bar-th" style="left:'+tp+'%"></div></div><div class="card-lb"><span>Fear</span><span>Greed</span></div></div>'+
-    kaHtml+sigHtml;
+    kaHtml+sigHtml+brHtml+smHtml;
 }
 
 function renderTFBar(){
@@ -293,6 +310,8 @@ function renderTable(){
   if(filters.fg_max!=null)rows=rows.filter(r=>r.f<=filters.fg_max);
   if(filters.fg_min!=null)rows=rows.filter(r=>r.f>=filters.fg_min);
   if(filters.swing)rows=rows.filter(r=>r.w===filters.swing);
+  if(filters.whale)rows=rows.filter(r=>r.wh===filters.whale);
+  if(filters.smartMin!=null)rows=rows.filter(r=>(r.ss||0)>=filters.smartMin);
 
   const fk=tfKey[cTF]||'f';
   const cols=[
@@ -300,9 +319,11 @@ function renderTable(){
     {k:'ch',l:'Chg%',S:1,tt:'Price deviation from 144-bar EMA'},{k:'m',l:'Market Cap',S:1,h:1},
     {k:'f',l:'F&G Daily',S:1,tt:'DGT Fear & Greed: <-25=Fear, >+25=Greed'},{k:'f1',l:'15m',S:1,h:1},
     {k:'fh',l:'1H',S:1,h:1},{k:'f4',l:'4H',S:1,h:1},{k:'fw',l:'Wk',S:1,h:1},
+    {k:'ss',l:'Smart',S:1,tt:'Smart Score 0-100: F&G depth + volume spike + RSI oversold + momentum'},
     {k:'z',l:'Zone',tt:'DGT zones: Despondency < Panic < Fear < Anxiety < Balanced < Optimism < Excitement < Thrill < Euphoria'},
     {k:'',l:'Trend',tt:'Cross-TF trend: 15m→1H→4H→Daily→Weekly. Green=improving, Red=worsening'},
-    {k:'w',l:'Signal',tt:'ENTRY: F&G below 10th pctl for asset class. EXIT: above 75th pctl.'}
+    {k:'w',l:'Signal',tt:'ENTRY: F&G below 10th pctl for asset class. EXIT: above 75th pctl.'},
+    {k:'wh',l:'Whale',tt:'ACC=Accumulation (high volume during fear). DIST=Distribution (high volume during greed).'}
   ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
   document.getElementById('thead').innerHTML=cols.map(c=>{
@@ -327,9 +348,11 @@ function renderTable(){
       '<td>'+fgBadge(r.f)+'</td>'+
       '<td class="hm">'+fgBadge(r.f1)+'</td><td class="hm">'+fgBadge(r.fh)+'</td>'+
       '<td class="hm">'+fgBadge(r.f4)+'</td><td class="hm">'+fgBadge(r.fw)+'</td>'+
+      '<td style="font-size:10px;color:'+(r.ss>=60?'#0ecb81':r.ss>=30?'#f0b90b':'#848e9c')+';font-weight:'+(r.ss>=60?'600':'400')+'">'+(r.ss||0)+'</td>'+
       '<td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td>'+
       '<td><canvas class="sparkline" width="60" height="20" data-spark="'+(r.spark||[]).join(',')+'"></canvas></td>'+
-      '<td>'+sw+'</td></tr>';
+      '<td>'+sw+'</td>'+
+      '<td style="font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">🐋 ACC</span>':r.wh==='DIST'?'<span style="color:#f6465d">🔴 DIST</span>':'—')+'</td></tr>';
   }).join('');
 
   // Draw sparklines
@@ -379,11 +402,13 @@ function doSort(c){if(!c)return;if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='f'||c
 function switchTF(tf){cTF=tf;sCol=tfKey[tf]||'f';loadPage(1);loadScatter()}
 function switchCat(c){cCat=c||null;loadPage(1);loadScatter()}
 function toggleWL(){showWL=!showWL;cCat=null;renderTable();renderCatBar()}
-function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null};
+function applyPreset(p){filters={fg_max:null,fg_min:null,swing:null,whale:null,smartMin:null};
   if(p==='fear')filters.fg_max=-10;
   if(p==='extreme')filters.fg_max=-30;
   if(p==='entry')filters.swing='ENTRY ZONE';
   if(p==='greed')filters.fg_min=25;
+  if(p==='whale')filters.whale='ACC';
+  if(p==='smart')filters.smartMin=60;
   renderTable()}
 async function refresh(){await loadPage(curPage);loadScatter()}
 async function toggleFav(s,ev){ev?.stopPropagation();if(FAVS.includes(s)){FAVS=FAVS.filter(x=>x!==s);fetch('/api/watchlist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}else{FAVS.push(s);fetch('/api/watchlist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})})}renderTable();renderCatBar()}
@@ -575,6 +600,26 @@ async function openDM(sym,cat){
   renderTFButtons();
   updateTVWidget(sym,'D');
   await loadFGChart(sym,'D');
+  // Load on-chain data for crypto
+  const ocEl=document.getElementById('dmOnchain');
+  ocEl.style.display='none';ocEl.innerHTML='';
+  if(cat?.includes('Crypto')||['BTC','ETH','SOL','XRP','BNB','DOGE','ADA','AVAX','DOT','LINK'].includes(sym)){
+    try{
+      const ocr=await fetch('/api/onchain/'+encodeURIComponent(sym));
+      const oc=await ocr.json();
+      if(!oc.error){
+        ocEl.style.display='flex';
+        const items=[];
+        if(oc.athDistance!=null)items.push('<span>ATH: <b style="color:'+(oc.athDistance<-50?'#f6465d':oc.athDistance<-20?'#ff9800':'#848e9c')+'">'+oc.athDistance+'%</b></span>');
+        if(oc.volMcapRatio!=null)items.push('<span>Vol/MCap: <b>'+oc.volMcapRatio+'%</b></span>');
+        if(oc.sentiment?.up!=null)items.push('<span>Sentiment: <b style="color:'+(oc.sentiment.up>60?'#0ecb81':'#f6465d')+'">'+Math.round(oc.sentiment.up)+'% bull</b></span>');
+        if(oc.watchlistUsers)items.push('<span>Watching: <b>'+(oc.watchlistUsers>1e6?(oc.watchlistUsers/1e6).toFixed(1)+'M':(oc.watchlistUsers/1e3).toFixed(0)+'K')+'</b></span>');
+        if(oc.priceChange?.d30!=null)items.push('<span>30d: <b style="color:'+(oc.priceChange.d30>0?'#0ecb81':'#f6465d')+'">'+(oc.priceChange.d30>0?'+':'')+oc.priceChange.d30.toFixed(1)+'%</b></span>');
+        if(oc.maxSupply&&oc.circulatingSupply)items.push('<span>Supply: <b>'+Math.round(oc.circulatingSupply/oc.maxSupply*100)+'%</b> minted</span>');
+        ocEl.innerHTML=items.join('');
+      }
+    }catch{}
+  }
 }
 function closeDM(){document.getElementById('dmBg').classList.remove('open');document.getElementById('tvContainer').innerHTML='';if(dmFGChart){dmFGChart.destroy();dmFGChart=null}}
 function toggleFavDM(){if(!dmSym)return;toggleFav(dmSym);document.getElementById('dmStar').className='star '+(FAVS.includes(dmSym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(dmSym)?'★':'☆'}
@@ -684,10 +729,13 @@ async function loadSignals(){
 
     let html='<div class="sig-section"><div class="sig-title">REGIME STATUS</div><div style="padding:4px 0;font-size:12px">'+regime+'</div></div>';
 
-    html+='<div class="sig-section"><div class="sig-title">ENTRY SIGNALS ('+d.signals?.entry+' total, showing top 30)</div>';
-    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Zone</th><th>Price</th><th>Action</th></tr>';
-    entry.slice(0,30).forEach(r=>{
-      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td><td><button class="btn" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openDM(\''+r.s+'\',\''+r.c+'\')">View</button></td></tr>';
+    // Sort by Smart Score (highest quality signals first)
+    const entryRanked=[...entry].sort((a,b)=>(b.ss||0)-(a.ss||0));
+    html+='<div class="sig-section"><div class="sig-title">ENTRY SIGNALS — ranked by Smart Score ('+d.signals?.entry+' total, top 30)</div>';
+    html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Smart</th><th>Whale</th><th>RSI</th><th>Price</th><th>Action</th></tr>';
+    entryRanked.slice(0,30).forEach(r=>{
+      const ssCol=r.ss>=60?'#0ecb81':r.ss>=30?'#f0b90b':'#848e9c';
+      html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="color:'+ssCol+';font-weight:600">'+(r.ss||0)+'</td><td style="font-size:10px">'+(r.wh==='ACC'?'🐋':'—')+'</td><td style="color:#848e9c">'+(r.r!=null?r.r:'—')+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td><td><button class="btn" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openDM(\''+r.s+'\',\''+r.c+'\')">View</button></td></tr>';
     });
     html+='</table></div>';
 

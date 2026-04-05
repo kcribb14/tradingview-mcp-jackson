@@ -90,6 +90,24 @@ function rebuildData() {
       const clamp = v => v != null ? Math.max(-80, Math.min(100, Math.round(v * 10) / 10)) : null;
       // 24h change approximation from pmacd component (price vs EMA deviation)
       const ch = entry.components?.pmacd != null ? Math.round(entry.components.pmacd * 100) / 100 : null;
+      // Whale proxy: volume spike detection from moneyFlow component
+      // High |moneyFlow| during fear = unusual volume = whale activity
+      const mf = entry.components?.moneyFlow ?? 0;
+      const volSpike = Math.abs(mf) > 30; // moneyFlow > 30 means volume significantly above normal
+      const whale = (volSpike && fg < cal.thresholds?.fear) ? 'ACC' : volSpike && fg > (cal.thresholds?.greed ?? 5) ? 'DIST' : '';
+
+      // ATH distance proxy from ror component (144-bar return)
+      const ror = entry.components?.ror ?? 0;
+      // If ror is very negative, price is far below 144-day level (proxy for ATH distance)
+      const athDist = ror != null ? Math.round(ror * 10) / 10 : null;
+
+      // Smart Score: composite of F&G depth + volume signal + momentum
+      const fgDepth = cal.severity <= -2 ? 40 : cal.severity === -1 ? 25 : cal.severity === 0 ? 10 : 0;
+      const volBonus = volSpike && fg < 0 ? 20 : 0; // Volume spike during fear = accumulation
+      const rsiBonus = (entry.rsi ?? 50) < 30 ? 20 : (entry.rsi ?? 50) < 40 ? 10 : 0; // Oversold RSI
+      const momentumBonus = (entry.components?.pmacd ?? 0) < -10 ? 20 : (entry.components?.pmacd ?? 0) < -5 ? 10 : 0;
+      const smartScore = Math.min(100, fgDepth + volBonus + rsiBonus + momentumBonus);
+
       rows.push({
         s: sym, f: clamp(fg), z: zn, c: cat, t: tier, w: sw, p: Math.round(price * 1e6) / 1e6, m: Math.round(mcap),
         r: entry.rsi ? Math.round(entry.rsi * 10) / 10 : null, ch,
@@ -97,6 +115,9 @@ function rebuildData() {
         fh: clamp(cache[sym + ':60']?.fgScore),
         f4: clamp(cache[sym + ':240']?.fgScore),
         fw: clamp(cache[sym + ':W']?.fgScore),
+        wh: whale, // Whale signal: ACC/DIST/''
+        ad: athDist, // ATH distance proxy (144-bar return)
+        ss: smartScore, // Smart Score 0-100
       });
       const last = rows[rows.length - 1];
       last.spark = [last.f1, last.fh, last.f4, last.f, last.fw].filter(v => v != null);
@@ -146,6 +167,18 @@ function rebuildData() {
       'Weekly': rows.filter(r => r.fw != null).length,
     };
 
+    // Market breadth: % of symbols with positive pmacd (price above EMA-144)
+    const breadth = {};
+    const breadthClasses = { 'US Large Cap': 'US', 'US Mid/Small': 'US', 'ASX Top 50': 'ASX', 'ASX Mining Mid': 'ASX', 'ASX Mining Micro': 'ASX', 'Crypto Major': 'Crypto', 'Crypto Mid': 'Crypto' };
+    for (const r of rows) {
+      const group = breadthClasses[r.c] || 'Other';
+      if (!breadth[group]) breadth[group] = { above: 0, total: 0 };
+      breadth[group].total++;
+      if (r.ch != null && r.ch > 0) breadth[group].above++; // pmacd > 0 = above EMA
+    }
+    const breadthPct = {};
+    for (const [g, b] of Object.entries(breadth)) breadthPct[g] = b.total > 0 ? Math.round(b.above / b.total * 100) : 0;
+
     DATA = {
       rows,
       stats: {
@@ -153,6 +186,9 @@ function rebuildData() {
         avgFG: rows.length > 0 ? Math.round(sumFG / rows.length * 100) / 100 : 0,
         oversold: rows.filter(r => r.f <= -25).length,
         overbought: rows.filter(r => r.f >= 25).length,
+        whaleAcc: rows.filter(r => r.wh === 'ACC').length,
+        smartSignals: rows.filter(r => r.ss >= 60).length,
+        breadth: breadthPct,
       },
       categories: Object.entries(cats).map(([name, count]) => ({ name, count })).sort((a, b) => {
         const order = ['Crypto Major', 'Crypto Mid', 'US Large Cap', 'US Mid/Small', 'ASX Top 50', 'ASX Mining Mid', 'ASX Mining Micro', 'DEX Solana', 'DEX Ethereum', 'DEX Other', 'Commodities', 'ETFs'];
@@ -399,6 +435,42 @@ app.post('/api/watchlist/remove', (req, res) => {
   const sym = req.body?.symbol;
   FAVS = FAVS.filter(s => s !== sym); saveFavorites(FAVS);
   res.json({ success: true, favorites: FAVS });
+});
+
+// ─── On-chain enrichment (CoinGecko) ────────────────────────────────────────
+
+const cgIdMap = new Map();
+// Hardcode top crypto to avoid CoinGecko ID collisions
+const CG_OVERRIDES = { BTC:'bitcoin', ETH:'ethereum', SOL:'solana', XRP:'ripple', BNB:'binancecoin', ADA:'cardano', DOGE:'dogecoin', AVAX:'avalanche-2', DOT:'polkadot', LINK:'chainlink', ATOM:'cosmos', UNI:'uniswap', AAVE:'aave', LTC:'litecoin', NEAR:'near', FIL:'filecoin', ARB:'arbitrum', OP:'optimism', APT:'aptos', INJ:'injective-protocol', SUI:'sui', SEI:'sei-network', TIA:'celestia', PEPE:'pepe', BONK:'bonk', PENDLE:'pendle', ENA:'ethena', HBAR:'hedera-hashgraph', ALGO:'algorand', FTM:'fantom', SHIB:'shiba-inu', MATIC:'matic-network', MKR:'maker', IMX:'immutable-x', SAND:'the-sandbox', MANA:'decentraland', AXS:'axie-infinity', FET:'fetch-ai', RNDR:'render-token', GRT:'the-graph', STX:'blockstack' };
+for (const [sym, id] of Object.entries(CG_OVERRIDES)) cgIdMap.set(sym, id);
+try {
+  const f = join(HOME, '.tradingview-mcp', 'universes', 'crypto_tokens.json');
+  if (existsSync(f)) for (const t of JSON.parse(readFileSync(f, 'utf8'))) if (t.symbol && t.id && !cgIdMap.has(t.symbol.toUpperCase())) cgIdMap.set(t.symbol.toUpperCase(), t.id);
+} catch {}
+
+app.get('/api/onchain/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol.toUpperCase();
+    const cgId = cgIdMap.get(sym);
+    if (!cgId) return res.json({ error: 'Not a known crypto token', symbol: sym });
+    const r = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}?localization=false&tickers=false&community_data=true&developer_data=false`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return res.json({ error: 'CoinGecko unavailable' });
+    const d = await r.json();
+    const m = d.market_data || {};
+    res.json({
+      symbol: sym,
+      athDistance: m.ath_change_percentage?.usd != null ? Math.round(m.ath_change_percentage.usd * 10) / 10 : null,
+      athDate: m.ath_date?.usd,
+      atlDistance: m.atl_change_percentage?.usd != null ? Math.round(m.atl_change_percentage.usd) : null,
+      volMcapRatio: m.total_volume?.usd && m.market_cap?.usd ? Math.round(m.total_volume.usd / m.market_cap.usd * 10000) / 100 : null,
+      priceChange: { h1: m.price_change_percentage_1h_in_currency?.usd, d1: m.price_change_percentage_24h, d7: m.price_change_percentage_7d, d30: m.price_change_percentage_30d, d200: m.price_change_percentage_200d, y1: m.price_change_percentage_1y },
+      sentiment: { up: d.sentiment_votes_up_percentage, down: d.sentiment_votes_down_percentage },
+      watchlistUsers: d.watchlist_portfolio_users,
+      circulatingSupply: m.circulating_supply,
+      maxSupply: m.max_supply,
+      fdv: m.fully_diluted_valuation?.usd,
+    });
+  } catch (e) { res.json({ error: e.message?.slice(0, 80) }); }
 });
 
 // ─── Add token + Discover ───────────────────────────────────────────────────
