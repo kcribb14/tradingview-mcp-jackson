@@ -300,6 +300,7 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
 Chart.register(ChartDataLabels);
 
 let D={symbols:[],stats:{},categories:[],tfCounts:{}},chart=null,cTF='Daily',cCat=null,sCol='f',sDir=1,curPage=1,pageSize=100;
+let selectedCats=new Set(); // multi-select categories
 let FAVS=[],showWL=false,filters={fg_max:null,swing:null},dmSym=null,dmFGChart=null;
 const TFS=['Daily','15m','1H','4H','Weekly'];
 const tfKey={Daily:'f','15m':'f1','1H':'fh','4H':'f4',Weekly:'fw'};
@@ -313,8 +314,10 @@ function zone(v){return v>=73?'Euphoria':v>=41?'Thrill':v>=10?'Excitement':v>=5?
 async function loadFavs(){try{FAVS=await(await fetch('/api/watchlist')).json()}catch{FAVS=[]}}
 
 async function loadPage(page){
-  const cat=cCat?'&category='+encodeURIComponent(cCat):'';
-  const r=await fetch('/api/cached?page='+page+'&limit='+pageSize+'&sort='+sCol+'&order='+(sDir===1?'asc':'desc')+cat);
+  let catParam='';
+  if(selectedCats.size>0)catParam='&categories='+[...selectedCats].map(encodeURIComponent).join(',');
+  else if(cCat)catParam='&category='+encodeURIComponent(cCat);
+  const r=await fetch('/api/cached?page='+page+'&limit='+pageSize+'&sort='+sCol+'&order='+(sDir===1?'asc':'desc')+catParam);
   const d=await r.json();
   D.stats=d.stats||{};D.categories=d.categories||[];D.tfCounts=d.tfCounts||{};D.updated=d.updated;
   D.symbols=d.symbols||[];D.total=d.total;D.pages=d.pages;curPage=d.page;
@@ -322,8 +325,10 @@ async function loadPage(page){
 }
 
 async function loadScatter(){
-  const cat=cCat?'?category='+encodeURIComponent(cCat):'';
-  try{const r=await fetch('/api/scatter'+cat);D.scatterDots=await r.json()}catch{D.scatterDots=[]}
+  let catQ='';
+  if(selectedCats.size>0)catQ='?categories='+[...selectedCats].map(encodeURIComponent).join(',');
+  else if(cCat)catQ='?category='+encodeURIComponent(cCat);
+  try{const r=await fetch('/api/scatter'+catQ);D.scatterDots=await r.json()}catch{D.scatterDots=[]}
   renderScatter();
 }
 
@@ -396,10 +401,53 @@ function renderTFBar(){
 }
 
 function renderCatBar(){
-  let h='<button class="btn '+(!cCat&&!showWL?'active':'')+'" onclick="showWL=false;switchCat(\'\')">All<span class="cnt">'+D.total+'</span></button>';
+  const noSel=selectedCats.size===0&&!cCat&&!showWL;
+  let h='<button class="btn '+(noSel?'active':'')+'" onclick="showWL=false;clearCats()">All<span class="cnt">'+D.total+'</span></button>';
   h+='<button class="btn '+(showWL?'active':'')+'" onclick="toggleWL()">★<span class="cnt">'+FAVS.length+'</span></button>';
-  for(const c of D.categories)h+='<button class="btn '+(c.name===cCat?'active':'')+'" onclick="showWL=false;switchCat(\''+c.name+'\')">'+c.name+'<span class="cnt">'+c.count+'</span></button>';
+  for(const c of D.categories){
+    const sel=selectedCats.has(c.name)||(selectedCats.size===0&&c.name===cCat);
+    h+='<button class="btn '+(sel?'active':'')+'" onclick="catClick(\''+c.name+'\',event)">'+c.name+'<span class="cnt">'+c.count+'</span></button>';
+  }
+  h+='<div style="color:#5e6673;font-size:10px;padding:2px 8px">SHIFT+click = multi-select</div>';
   document.getElementById('catBar').innerHTML=h;
+}
+function catClick(cat,ev){
+  showWL=false;
+  if(ev&&ev.shiftKey){
+    // Multi-select toggle
+    if(selectedCats.has(cat))selectedCats.delete(cat);
+    else selectedCats.add(cat);
+    cCat=selectedCats.size===1?[...selectedCats][0]:null;
+  }else{
+    // Single select
+    selectedCats.clear();
+    selectedCats.add(cat);
+    cCat=cat;
+  }
+  loadPage(1);loadScatter();renderCatBar();
+  // Load sector band if single category
+  if(selectedCats.size===1&&typeof loadSectorBand==='function')loadSectorBand([...selectedCats][0]);
+  else{const sb=document.getElementById('sectorBandSection');if(sb)sb.style.display='none'}
+  // Update sector bar
+  const bar=document.getElementById('sectorBar');
+  if(bar){
+    if(selectedCats.size===0){bar.style.display='none'}
+    else{
+      bar.style.display='';
+      const names=[...selectedCats].join(' + ');
+      bar.innerHTML='<span style="font-weight:700">'+names+'</span>';
+      if(selectedCats.size===1){
+        fetch('/api/sector/'+encodeURIComponent([...selectedCats][0])).then(r=>r.json()).then(d=>{
+          if(!d.error){const ac=d.avgFG<=-10?'#f6465d':d.avgFG>=10?'#0ecb81':'#848e9c';
+          bar.innerHTML='<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><span style="font-weight:700">'+d.category+'</span><span>'+d.count+' symbols</span><span>Avg F&G: <b style="color:'+ac+'">'+(d.avgFG>0?'+':'')+d.avgFG+'</b></span><span>'+d.fearPct+'% in fear</span></div>'}
+        }).catch(()=>{});
+      }
+    }
+  }
+}
+function clearCats(){selectedCats.clear();cCat=null;loadPage(1);loadScatter();renderCatBar();
+  const sb=document.getElementById('sectorBandSection');if(sb)sb.style.display='none';
+  const bar=document.getElementById('sectorBar');if(bar)bar.style.display='none';
 }
 
 function renderScatter(){
@@ -727,7 +775,10 @@ function doSort(c){if(!c)return;if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='f'||c
 function switchTF(tf){cTF=tf;sCol=tfKey[tf]||'f';loadPage(1);loadScatter()}
 let sectorBandChart=null,sectorHistChart=null;
 function switchCat(c){
-  cCat=c||null;loadPage(1);loadScatter();
+  // Legacy single-select (used from Cycle tab etc)
+  selectedCats.clear();
+  if(c)selectedCats.add(c);
+  cCat=c||null;loadPage(1);loadScatter();renderCatBar();
   const bar=document.getElementById('sectorBar');
   const bandSection=document.getElementById('sectorBandSection');
   if(!c){bar.style.display='none';bandSection.style.display='none';return}

@@ -280,11 +280,17 @@ app.get('/api/cached', (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(500, Math.max(10, parseInt(req.query.limit) || 200));
     const category = req.query.category || null;
+    const categories = req.query.categories ? req.query.categories.split(',') : null;
     const sort = req.query.sort || 'f';
     const order = req.query.order === 'desc' ? -1 : 1;
 
     let filtered = DATA.rows;
-    if (category) filtered = filtered.filter(r => r.c === category || r.c.includes(category));
+    if (categories && categories.length > 0) {
+      const catSet = new Set(categories);
+      filtered = filtered.filter(r => catSet.has(r.c) || categories.some(c => r.c.includes(c)));
+    } else if (category) {
+      filtered = filtered.filter(r => r.c === category || r.c.includes(category));
+    }
 
     // Sort — nulls always go to bottom regardless of sort direction
     filtered = [...filtered].sort((a, b) => {
@@ -330,7 +336,14 @@ app.get('/api/cached', (req, res) => {
 app.get('/api/scatter', (req, res) => {
   try {
     const category = req.query.category || null;
-    let rows = category ? DATA.rows.filter(r => r.c === category || r.c.includes(category)) : DATA.rows;
+    const categories = req.query.categories ? req.query.categories.split(',') : null;
+    let rows = DATA.rows;
+    if (categories && categories.length > 0) {
+      const catSet = new Set(categories);
+      rows = rows.filter(r => catSet.has(r.c) || categories.some(c => r.c.includes(c)));
+    } else if (category) {
+      rows = rows.filter(r => r.c === category || r.c.includes(category));
+    }
     // Top 250 most fearful + top 250 most greedy
     const sorted = [...rows].sort((a, b) => a.f - b.f);
     const fear = sorted.slice(0, 250);
