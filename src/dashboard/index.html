@@ -209,7 +209,14 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <div id="viewScanner" class="tab-hidden">
 <div id="sectorBar" style="display:none;padding:8px 16px;background:#181a20;border-bottom:1px solid #2b2f36;font-size:12px"></div>
 <div id="catLoadingBar" style="display:none;padding:4px 16px"></div>
-<div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
+<div style="display:flex;gap:4px;padding:2px 16px;align-items:center">
+  <button class="btn active" id="vTable" onclick="setScannerView('table')" style="font-size:11px;padding:3px 10px">Table</button>
+  <button class="btn" id="vHeatmap" onclick="setScannerView('heatmap')" style="font-size:11px;padding:3px 10px">Heatmap</button>
+  <button class="btn" id="vCards" onclick="setScannerView('cards')" style="font-size:11px;padding:3px 10px">Cards</button>
+</div>
+<div id="tableContainer" style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
+<div id="heatmapContainer" style="display:none;padding:4px;min-height:300px"></div>
+<div id="cardsContainer" style="display:none;padding:4px"></div>
 </div>
 <!-- Watchlist Grid view -->
 <div id="viewWatchgrid" class="tab-hidden" style="padding:12px">
@@ -861,6 +868,100 @@ async function renderCompare(){
 }
 
 function goPage(d){curPage=Math.max(1,Math.min(D.pages||1,curPage+d));loadPage(curPage)}
+
+// ─── Scanner View Toggle: Table / Heatmap / Cards ──────────────────────────
+let scannerViewMode='table';
+function setScannerView(mode){
+  scannerViewMode=mode;
+  document.getElementById('tableContainer').style.display=mode==='table'?'':'none';
+  document.getElementById('heatmapContainer').style.display=mode==='heatmap'?'':'none';
+  document.getElementById('cardsContainer').style.display=mode==='cards'?'':'none';
+  document.getElementById('vTable').classList.toggle('active',mode==='table');
+  document.getElementById('vHeatmap').classList.toggle('active',mode==='heatmap');
+  document.getElementById('vCards').classList.toggle('active',mode==='cards');
+  const pager=document.getElementById('pager');if(pager)pager.className=mode==='table'?pager.className.replace('scanner-hidden','scanner-visible'):pager.className.replace('scanner-visible','scanner-hidden');
+  if(mode==='heatmap')renderHeatmap();
+  if(mode==='cards')renderCardGrid();
+}
+
+function fgHeatColor(fg){
+  if(fg<-30)return'#004d00';if(fg<-20)return'#006400';if(fg<-10)return'#0a7a4a';
+  if(fg<0)return'#3a6b5a';if(fg<10)return'#555';if(fg<20)return'#8b4513';
+  if(fg<30)return'#cc3333';return'#990000';
+}
+
+function renderHeatmap(){
+  const container=document.getElementById('heatmapContainer');
+  container.innerHTML='';
+  const syms=(D.symbols||[]).slice(0,500); // limit for performance
+  if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
+  container.style.display='flex';container.style.flexWrap='wrap';container.style.gap='2px';container.style.alignContent='flex-start';
+
+  // Sort by market cap descending
+  const sorted=[...syms].sort((a,b)=>(b.m||0)-(a.m||0));
+  const maxLog=Math.log10(Math.max(sorted[0]?.m||1e6,1e6));
+
+  for(const s of sorted){
+    const logSize=Math.log10(Math.max(s.m||1e6,1e6));
+    const sizePct=logSize/maxLog;
+    const boxW=Math.max(55,Math.min(180,sizePct*160));
+    const boxH=Math.max(35,boxW*0.55);
+    const fg=s.f||0;const col=fgHeatColor(fg);
+    const textSz=boxW>100?13:boxW>70?11:9;
+
+    const box=document.createElement('div');
+    box.style.cssText='width:'+boxW+'px;height:'+boxH+'px;background:'+col+';border-radius:4px;padding:3px;display:flex;flex-direction:column;justify-content:center;align-items:center;cursor:pointer;border:1px solid rgba(255,255,255,0.08);overflow:hidden';
+    box.innerHTML='<div style="font-weight:700;font-size:'+textSz+'px;color:#fff;line-height:1.1">'+s.s+'</div>'+
+      '<div style="font-size:'+(textSz+1)+'px;font-weight:700;color:#fff">'+(fg>0?'+':'')+fg.toFixed(1)+'</div>'+
+      (s.ch!=null?'<div style="font-size:8px;color:'+(s.ch>=0?'#aaffaa':'#ffaaaa')+'">'+(s.ch>=0?'+':'')+s.ch?.toFixed(1)+'%</div>':'');
+    box.title=s.s+': F&G '+(fg>0?'+':'')+fg.toFixed(1)+' | '+(s.p?'$'+s.p.toFixed(s.p<1?4:2):'—')+' | '+(s.ch!=null?s.ch.toFixed(1)+'%':'—');
+    box.onclick=()=>toggleRowExpand(s.s,s.c,box);
+    container.appendChild(box);
+  }
+}
+
+function renderCardGrid(){
+  const container=document.getElementById('cardsContainer');
+  container.innerHTML='';
+  const syms=(D.symbols||[]).slice(0,120);
+  if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
+  container.style.display='grid';container.style.gridTemplateColumns='repeat(auto-fill,minmax(170px,1fr))';container.style.gap='4px';
+
+  for(const s of syms){
+    const fg=s.f||0;
+    const borderCol=fg<-20?'#0ecb81':fg>20?'#f6465d':'#2b2f36';
+    const card=document.createElement('div');
+    card.style.cssText='background:#181a20;border:2px solid '+borderCol+';border-radius:6px;padding:8px;cursor:pointer;min-height:70px';
+    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
+      '<span style="font-weight:700;color:#eaecef;font-size:13px">'+s.s+'</span>'+
+      '<span style="font-size:12px;font-weight:700;color:'+(fg<-10?'#0ecb81':fg>10?'#f6465d':'#848e9c')+';background:'+(fg<-10?'rgba(14,203,129,0.15)':fg>10?'rgba(246,70,93,0.15)':'rgba(100,100,100,0.1)')+';padding:2px 6px;border-radius:3px">'+(fg>0?'+':'')+fg.toFixed(1)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:11px;color:#5e6673">'+
+        '<span>'+(s.p?'$'+(s.p<0.01?s.p.toExponential(1):s.p<1?s.p.toFixed(4):s.p.toFixed(2)):'—')+'</span>'+
+        '<span style="color:'+(s.ch>0?'#0ecb81':s.ch<0?'#f6465d':'#5e6673')+'">'+(s.ch!=null?(s.ch>0?'+':'')+s.ch.toFixed(1)+'%':'—')+'</span></div>'+
+      '<div style="margin-top:2px;font-size:9px;color:#5e6673">'+
+        (s.c||'')+
+        (s.wh==='ACC'?' 🐋':'')+(s.sg==='A'?' 🎯':'')+(s.gs>50?' 🔬':'')+
+      '</div>'+
+      '<canvas class="card-spark" width="160" height="25" data-spark="'+(s.spark||[]).join(',')+'"></canvas>';
+    card.onclick=()=>openDM(s.s,s.c);
+    container.appendChild(card);
+  }
+  // Draw sparklines
+  container.querySelectorAll('canvas.card-spark').forEach(cv=>{
+    const raw=cv.dataset.spark;if(!raw)return;
+    const pts=raw.split(',').map(Number).filter(v=>!isNaN(v));
+    if(pts.length<2)return;
+    const ctx=cv.getContext('2d');const w=cv.width,h=cv.height;
+    const mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1;
+    ctx.beginPath();
+    pts.forEach((v,j)=>{
+      const x=j*(w/(pts.length-1));const y=h-((v-mn)/rng)*h;
+      j===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.strokeStyle=pts[pts.length-1]<pts[0]?'#0ecb81':'#f6465d';
+    ctx.lineWidth=1.5;ctx.stroke();
+  });
+}
 function goTo(p){curPage=p;loadPage(p)}
 function doSort(c){if(!c)return;if(sCol===c)sDir*=-1;else{sCol=c;sDir=c==='f'||c==='m'?1:-1};loadPage(1)}
 function switchTF(tf){cTF=tf;sCol=tfKey[tf]||'f';loadPage(1);loadScatter()}
