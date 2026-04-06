@@ -1012,6 +1012,19 @@ app.post('/api/open-in-tv', async (req, res) => {
 
 app.get('/', (req, res) => { res.sendFile(join(__dirname, 'index.html')); });
 
+// ─── Master Universe (loaded from external file — survives code changes) ─────
+
+let MASTER_UNIVERSE = {};
+let ALL_UNIVERSE_SYMBOLS = [];
+try {
+  const masterPath = join(HOME, '.tradingview-mcp', 'universes', 'master.json');
+  if (existsSync(masterPath)) {
+    MASTER_UNIVERSE = JSON.parse(readFileSync(masterPath, 'utf8'));
+    ALL_UNIVERSE_SYMBOLS = [...new Set(Object.values(MASTER_UNIVERSE).flat())];
+    console.log('Master universe loaded:', ALL_UNIVERSE_SYMBOLS.length, 'symbols across', Object.keys(MASTER_UNIVERSE).length, 'categories');
+  }
+} catch (e) { console.error('Master universe load error:', e.message); }
+
 // ─── Background Worker ──────────────────────────────────────────────────────
 
 const workerStatus = { state: 'idle', current: null, warmed: 0, total: 0, errors: 0 };
@@ -1039,6 +1052,8 @@ async function bgWorkerLoop() {
     for (const sym of TOP_100) for (const tf of allTFs) queue.push({ sym, tf, pri: 2 });
     // Priority 3: Recently viewed × all TFs
     for (const sym of recentViews) for (const tf of allTFs) queue.push({ sym, tf, pri: 3 });
+    // Priority 4: ALL universe symbols × daily (systematic fill)
+    for (const sym of ALL_UNIVERSE_SYMBOLS) queue.push({ sym, tf: 'D', pri: 4 });
 
     // Deduplicate and filter out fresh entries
     const seen = new Set();
