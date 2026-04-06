@@ -749,6 +749,57 @@ app.get('/api/extremes/:symbol', async (req, res) => {
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
+// Category status — how many cached vs universe total
+app.get('/api/category-status', (req, res) => {
+  const cats = req.query.categories ? req.query.categories.split(',') : [];
+  const cache = loadCache();
+  // Map display names back to universe keys
+  const nameToKey = { 'Crypto Major': 'CRYPTO_MAJOR', 'Crypto Mid': 'CRYPTO_MID', 'US Large Cap': 'US_LARGE_CAP', 'US Mid/Small': 'US_MID_SMALL', 'ASX Top 50': 'ASX_TOP50', 'ASX Mining Mid': 'ASX_MINING_MID', 'ASX Mining Micro': 'ASX_MINING_MICRO', 'DEX Solana': 'DEX_SOLANA', 'DEX Other': 'DEX_OTHER', 'DEX Ethereum': 'DEX_SOLANA', 'DEX Base': 'DEX_OTHER', 'Commodities': 'COMMODITIES', 'ETFs': 'ETFS', 'Hong Kong': 'HONG_KONG', 'Japan': 'JAPAN', 'India': 'INDIA', 'Germany': 'GERMANY', 'South Africa': 'SOUTH_AFRICA', 'Canada TSX': 'CANADA_TSX', 'London LSE': 'LONDON_LSE' };
+  let total = 0, cached = 0;
+  for (const cat of cats) {
+    const key = nameToKey[cat] || cat;
+    const syms = MASTER_UNIVERSE[key] || [];
+    total += syms.length;
+    cached += syms.filter(s => cache[s + ':D']?.fgScore != null).length;
+  }
+  res.json({ total, cached, pct: total > 0 ? Math.round(cached / total * 100) : 100 });
+});
+
+// On-demand category warming
+app.post('/api/warm-category', async (req, res) => {
+  const cats = req.body?.categories || [];
+  const nameToKey = { 'Crypto Major': 'CRYPTO_MAJOR', 'Crypto Mid': 'CRYPTO_MID', 'US Large Cap': 'US_LARGE_CAP', 'US Mid/Small': 'US_MID_SMALL', 'ASX Top 50': 'ASX_TOP50', 'ASX Mining Mid': 'ASX_MINING_MID', 'ASX Mining Micro': 'ASX_MINING_MICRO', 'DEX Solana': 'DEX_SOLANA', 'DEX Other': 'DEX_OTHER', 'Commodities': 'COMMODITIES', 'ETFs': 'ETFS', 'Hong Kong': 'HONG_KONG', 'Japan': 'JAPAN', 'India': 'INDIA', 'Germany': 'GERMANY', 'South Africa': 'SOUTH_AFRICA', 'Canada TSX': 'CANADA_TSX', 'London LSE': 'LONDON_LSE' };
+  const cache = loadCache();
+  const syms = [];
+  for (const cat of cats) {
+    const key = nameToKey[cat] || cat;
+    if (MASTER_UNIVERSE[key]) syms.push(...MASTER_UNIVERSE[key]);
+  }
+  const uncached = [...new Set(syms)].filter(s => !cache[s + ':D']?.fgScore);
+  res.json({ queued: uncached.length, total: syms.length, cached: syms.length - uncached.length });
+
+  // Warm in background
+  const { computeTimeSeries } = await import('../core/fg_backtest.js');
+  (async () => {
+    for (let i = 0; i < uncached.length; i += 8) {
+      const batch = uncached.slice(i, i + 8);
+      await Promise.all(batch.map(async (sym) => {
+        try {
+          const bars = await fetchBars(sym, 'D');
+          if (bars && bars.length >= 30) {
+            const series = computeTimeSeries(bars);
+            if (series.length > 0) cacheScore(sym, 'D', series, bars);
+          }
+        } catch {}
+      }));
+      if (i % 100 === 0 && i > 0) { _saveCache(loadCache()); rebuildData(); }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    _saveCache(loadCache());
+    rebuildData();
+  })().catch(e => console.error('Warm error:', e.message));
+});
+
 // Geological data endpoint
 app.get('/api/geology/:symbol', (req, res) => {
   const sym = req.params.symbol;

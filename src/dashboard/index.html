@@ -208,6 +208,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
 <!-- Scanner view -->
 <div id="viewScanner" class="tab-hidden">
 <div id="sectorBar" style="display:none;padding:8px 16px;background:#181a20;border-bottom:1px solid #2b2f36;font-size:12px"></div>
+<div id="catLoadingBar" style="display:none;padding:4px 16px"></div>
 <div style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 </div>
 <!-- Watchlist Grid view -->
@@ -400,31 +401,85 @@ function renderTFBar(){
   }).join('');
 }
 
+// Sector group definitions
+const SECTOR_GROUPS=[
+  {label:'Crypto',subs:['Crypto Major','Crypto Mid']},
+  {label:'US',subs:['US Large Cap','US Mid/Small']},
+  {label:'ASX',subs:['ASX Top 50','ASX Mining Mid','ASX Mining Micro']},
+  {label:'DEX',subs:['DEX Solana','DEX Ethereum','DEX Base','DEX Other']},
+  {label:'Int\'l',subs:['Canada TSX','London LSE','Hong Kong','Japan','India','Germany','South Africa']},
+];
+const UNGROUPED=['Commodities','ETFs']; // shown as flat buttons
+
 function renderCatBar(){
   const noSel=selectedCats.size===0&&!cCat&&!showWL;
+  const catMap=new Map();for(const c of D.categories||[])catMap.set(c.name,c.count);
+
   let h='<button class="btn '+(noSel?'active':'')+'" onclick="showWL=false;clearCats()">All<span class="cnt">'+D.total+'</span></button>';
   h+='<button class="btn '+(showWL?'active':'')+'" onclick="toggleWL()">★<span class="cnt">'+FAVS.length+'</span></button>';
-  for(const c of D.categories){
-    const sel=selectedCats.has(c.name)||(selectedCats.size===0&&c.name===cCat);
-    h+='<button class="btn '+(sel?'active':'')+'" onclick="catClick(\''+c.name+'\',event)">'+c.name+'<span class="cnt">'+c.count+'</span></button>';
+
+  // Grouped sectors with dropdowns
+  for(const g of SECTOR_GROUPS){
+    const groupSubs=g.subs.filter(s=>catMap.has(s));
+    if(groupSubs.length===0)continue;
+    const groupTotal=groupSubs.reduce((s,c)=>s+(catMap.get(c)||0),0);
+    const anySel=groupSubs.some(s=>selectedCats.has(s));
+    h+='<div style="position:relative;display:inline-block" class="cat-grp">';
+    h+='<button class="btn '+(anySel?'active':'')+'" onclick="toggleCatDropdown(this,event)" style="position:relative">'+g.label+'<span class="cnt">'+groupTotal+'</span> ▾</button>';
+    h+='<div class="cat-dd" style="display:none;position:absolute;top:100%;left:0;background:#181a20;border:1px solid #2b2f36;border-radius:6px;z-index:100;min-width:180px;padding:4px;box-shadow:0 4px 12px rgba(0,0,0,0.4)">';
+    // "All group" button
+    h+='<button class="btn" style="display:block;width:100%;text-align:left;margin:2px 0;font-size:11px" onclick="catGroupClick('+JSON.stringify(groupSubs)+',event)">All '+g.label+'<span class="cnt">'+groupTotal+'</span></button>';
+    for(const sub of groupSubs){
+      const sel=selectedCats.has(sub);
+      h+='<button class="btn '+(sel?'active':'')+'" style="display:block;width:100%;text-align:left;margin:2px 0;font-size:11px" onclick="catClick(\''+sub+'\',event)">'+sub+'<span class="cnt">'+(catMap.get(sub)||0)+'</span></button>';
+    }
+    h+='</div></div>';
   }
-  h+='<div style="color:#5e6673;font-size:10px;padding:2px 8px">SHIFT+click = multi-select</div>';
+
+  // Ungrouped flat buttons
+  for(const u of UNGROUPED){
+    if(!catMap.has(u))continue;
+    const sel=selectedCats.has(u);
+    h+='<button class="btn '+(sel?'active':'')+'" onclick="catClick(\''+u+'\',event)">'+u+'<span class="cnt">'+(catMap.get(u)||0)+'</span></button>';
+  }
+
+  h+='<span style="color:#5e6673;font-size:9px;padding:0 6px">SHIFT = multi</span>';
   document.getElementById('catBar').innerHTML=h;
 }
+function toggleCatDropdown(btn,ev){
+  ev.stopPropagation();
+  const dd=btn.nextElementSibling;
+  // Close all other dropdowns
+  document.querySelectorAll('.cat-dd').forEach(d=>{if(d!==dd)d.style.display='none'});
+  dd.style.display=dd.style.display==='none'?'block':'none';
+}
+function catGroupClick(subs,ev){
+  ev.stopPropagation();
+  showWL=false;
+  if(ev.shiftKey){for(const s of subs)selectedCats.add(s)}
+  else{selectedCats.clear();for(const s of subs)selectedCats.add(s)}
+  cCat=selectedCats.size===1?[...selectedCats][0]:null;
+  document.querySelectorAll('.cat-dd').forEach(d=>d.style.display='none');
+  loadPage(1);loadScatter();renderCatBar();
+  triggerCategoryWarm();
+}
+// Close dropdowns on outside click
+document.addEventListener('click',()=>document.querySelectorAll('.cat-dd').forEach(d=>d.style.display='none'));
 function catClick(cat,ev){
+  ev?.stopPropagation();
   showWL=false;
   if(ev&&ev.shiftKey){
-    // Multi-select toggle
     if(selectedCats.has(cat))selectedCats.delete(cat);
     else selectedCats.add(cat);
     cCat=selectedCats.size===1?[...selectedCats][0]:null;
   }else{
-    // Single select
     selectedCats.clear();
     selectedCats.add(cat);
     cCat=cat;
   }
+  document.querySelectorAll('.cat-dd').forEach(d=>d.style.display='none');
   loadPage(1);loadScatter();renderCatBar();
+  triggerCategoryWarm();
   // Load sector band if single category
   if(selectedCats.size===1&&typeof loadSectorBand==='function')loadSectorBand([...selectedCats][0]);
   else{const sb=document.getElementById('sectorBandSection');if(sb)sb.style.display='none'}
@@ -448,6 +503,42 @@ function catClick(cat,ev){
 function clearCats(){selectedCats.clear();cCat=null;loadPage(1);loadScatter();renderCatBar();
   const sb=document.getElementById('sectorBandSection');if(sb)sb.style.display='none';
   const bar=document.getElementById('sectorBar');if(bar)bar.style.display='none';
+  document.getElementById('catLoadingBar').style.display='none';
+}
+
+let catWarmPoll=null;
+async function triggerCategoryWarm(){
+  if(selectedCats.size===0)return;
+  const cats=[...selectedCats];
+  try{
+    const sr=await fetch('/api/category-status?categories='+cats.map(encodeURIComponent).join(','));
+    const st=await sr.json();
+    if(st.cached>=st.total||st.pct>=95)return; // Already loaded
+    // Show loading bar
+    const lb=document.getElementById('catLoadingBar');
+    lb.style.display='';
+    lb.innerHTML='<div style="background:#1e2329;border:1px solid #2b2f36;border-radius:4px;padding:6px 10px">'+
+      '<div style="font-size:11px;color:#f0b90b">Loading '+cats.join(' + ')+': '+st.cached+'/'+st.total+' ('+st.pct+'%)</div>'+
+      '<div style="background:#2b2f36;height:6px;border-radius:3px;margin-top:4px"><div id="catProg" style="background:#f0b90b;height:100%;border-radius:3px;width:'+st.pct+'%;transition:.3s"></div></div></div>';
+    // Trigger warm
+    fetch('/api/warm-category',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({categories:cats})}).catch(()=>{});
+    // Poll progress
+    if(catWarmPoll)clearInterval(catWarmPoll);
+    catWarmPoll=setInterval(async()=>{
+      try{
+        const pr=await fetch('/api/category-status?categories='+cats.map(encodeURIComponent).join(','));
+        const ps=await pr.json();
+        const prog=document.getElementById('catProg');
+        if(prog)prog.style.width=ps.pct+'%';
+        lb.querySelector('div > div:first-child').textContent='Loading '+cats.join(' + ')+': '+ps.cached+'/'+ps.total+' ('+ps.pct+'%)';
+        if(ps.pct>=95||ps.cached>=ps.total){
+          clearInterval(catWarmPoll);catWarmPoll=null;
+          lb.style.display='none';
+          loadPage(1);loadScatter(); // Refresh with new data
+        }
+      }catch{}
+    },5000);
+  }catch{}
 }
 
 function renderScatter(){
