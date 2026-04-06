@@ -768,7 +768,8 @@ app.get('/api/category-status', (req, res) => {
     const key = nameToKey[cat] || cat;
     const syms = MASTER_UNIVERSE[key] || [];
     total += syms.length;
-    cached += syms.filter(s => cache[s + ':D']?.fgScore != null).length;
+    // Count as "cached" only if BOTH fgScore AND lastClose are present
+    cached += syms.filter(s => { const e = cache[s + ':D']; return e?.fgScore != null && e?.lastClose > 0; }).length;
   }
   res.json({ total, cached, pct: total > 0 ? Math.round(cached / total * 100) : 100 });
 });
@@ -783,7 +784,11 @@ app.post('/api/warm-category', async (req, res) => {
     const key = nameToKey[cat] || cat;
     if (MASTER_UNIVERSE[key]) syms.push(...MASTER_UNIVERSE[key]);
   }
-  const uncached = [...new Set(syms)].filter(s => !cache[s + ':D']?.fgScore);
+  // Include entries that have F&G but no price — they need re-fetching too
+  const uncached = [...new Set(syms)].filter(s => {
+    const entry = cache[s + ':D'];
+    return !entry?.fgScore || !entry?.lastClose || entry.lastClose === 0;
+  });
   res.json({ queued: uncached.length, total: syms.length, cached: syms.length - uncached.length });
 
   // Warm in background
@@ -1134,9 +1139,11 @@ async function bgWorkerLoop() {
       if (seen.has(key)) return false;
       seen.add(key);
       const entry = cache[key];
+      // Re-fetch if: missing entirely, OR has fgScore but no price (incomplete)
+      if (entry?.fgScore != null && (!entry.lastClose || entry.lastClose === 0)) return true; // Incomplete — needs re-fetch
       if (entry?.lastScanTime) {
         const age = now - new Date(entry.lastScanTime).getTime();
-        if (age < (TF_TTL[item.tf] || 86400e3)) return false; // Still fresh
+        if (age < (TF_TTL[item.tf] || 86400e3)) return false; // Still fresh AND complete
       }
       return true;
     }).sort((a, b) => a.pri - b.pri);
