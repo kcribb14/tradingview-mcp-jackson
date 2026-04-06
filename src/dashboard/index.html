@@ -213,7 +213,7 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn active" id="vTable" onclick="setScannerView('table')" style="font-size:11px;padding:3px 10px">Table</button>
   <button class="btn" id="vHeatmap" onclick="setScannerView('heatmap')" style="font-size:11px;padding:3px 10px">Heatmap</button>
   <button class="btn" id="vCards" onclick="setScannerView('cards')" style="font-size:11px;padding:3px 10px">Cards</button>
-  <button class="btn" id="vCharts" onclick="setScannerView('charts')" style="font-size:11px;padding:3px 10px">Charts</button>
+  <button class="btn" id="vCharts" onclick="setScannerView('charts')" style="font-size:11px;padding:3px 10px">Overlay</button>
 </div>
 <div id="tableContainer" style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div id="heatmapContainer" style="display:none;padding:4px;min-height:300px"></div>
@@ -1254,91 +1254,101 @@ function fmtTime(ts,tf){
 
 // ─── Bulk Chart View ────────────────────────────────────────────────────────
 
+let _bulkChart=null,_bulkRange='3M',_bulkSyms=[];
+
 async function renderBulkCharts(){
   const container=document.getElementById('chartsContainer');
-  container.innerHTML='<div style="text-align:center;padding:20px;color:#5e6673">Loading charts...</div>';
-  const syms=(D.symbols||[]).slice(0,100);
+  const syms=D.symbols||[];_bulkSyms=syms;
   if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
+  const mode=syms.length<=30?'lines':'band';
 
-  const YMIN=-60,YMAX=60;
+  container.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;flex-wrap:wrap">'+
+    '<span style="color:#5e6673;font-size:11px">'+syms.length+' symbols — '+(mode==='lines'?'individual lines':'distribution band')+' — shared Y</span>'+
+    '<div style="display:flex;gap:3px">'+
+    ['1M','3M','6M','1Y','2Y','ALL'].map(r=>'<button class="btn'+(r===_bulkRange?' active':'')+'" onclick="setBulkRange(\''+r+'\')" style="font-size:10px;padding:2px 6px">'+r+'</button>').join('')+
+    '</div></div>'+
+    '<div style="position:relative;height:calc(100vh - 320px);min-height:380px"><canvas id="bulkOvCv"></canvas></div>'+
+    '<div id="bulkLegend" style="padding:4px 8px;font-size:11px"></div>';
 
-  // Sort controls + grid
-  let html='<div style="display:flex;gap:4px;padding:4px 8px;align-items:center;flex-wrap:wrap">';
-  html+='<span style="color:#5e6673;font-size:11px">Sort:</span>';
-  html+='<button class="btn" onclick="bulkChartSort(\'f\',1)" style="font-size:10px;padding:2px 6px">F&G ↑ (fear first)</button>';
-  html+='<button class="btn" onclick="bulkChartSort(\'f\',-1)" style="font-size:10px;padding:2px 6px">F&G ↓</button>';
-  html+='<button class="btn" onclick="bulkChartSort(\'m\',-1)" style="font-size:10px;padding:2px 6px">MCap ↓</button>';
-  html+='<span style="color:#5e6673;font-size:10px;margin-left:8px">'+syms.length+' symbols | Shared Y: '+YMIN+' to +'+YMAX+'</span></div>';
-  html+='<div id="bulkGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px;padding:4px"></div>';
-  container.innerHTML=html;
-
-  const grid=document.getElementById('bulkGrid');
-  for(let i=0;i<syms.length;i++){
-    const s=syms[i];const fg=s.f||0;
-    const borderCol=fg<-20?'#0ecb81':fg>20?'#f6465d':'#2b2f36';
-    const cell=document.createElement('div');
-    cell.style.cssText='background:#12151a;border:1px solid '+borderCol+';border-left:3px solid '+borderCol+';border-radius:4px;padding:3px;cursor:pointer';
-    cell.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1px">'+
-      '<span style="font-weight:700;color:#eaecef;font-size:11px">'+s.s+'</span>'+
-      '<div style="display:flex;gap:4px;align-items:center">'+
-        (s.ch!=null?'<span style="font-size:9px;color:'+(s.ch>=0?'#0ecb81':'#f6465d')+'">'+(s.ch>=0?'+':'')+s.ch?.toFixed(1)+'%</span>':'')+
-        '<span style="font-size:12px;font-weight:700;color:'+(fg<-10?'#0ecb81':fg>10?'#f6465d':'#848e9c')+'">'+(fg>0?'+':'')+fg.toFixed(1)+'</span>'+
-      '</div></div>'+
-      '<canvas id="bc'+i+'" width="260" height="65"></canvas>';
-    cell.onclick=()=>openDM(s.s,s.c);
-    grid.appendChild(cell);
-  }
-
-  // Render charts in batches
-  for(let i=0;i<syms.length;i+=10){
-    const batch=syms.slice(i,i+10);
-    await Promise.all(batch.map(async(s,bi)=>{
-      const idx=i+bi;
-      try{
-        const r=await fetch('/api/history/'+encodeURIComponent(s.s)+'?tf=D');
-        const d=await r.json();
-        const fgArr=(d.fg||[]).slice(-90).map(x=>x.v);
-        if(fgArr.length<5)return;
-        const cv=document.getElementById('bc'+idx);if(!cv)return;
-        const ctx=cv.getContext('2d');const w=cv.width,h=cv.height;
-
-        // Zone backgrounds
-        const zones=[[YMAX,15,'rgba(246,70,93,0.06)'],[15,0,'rgba(200,180,100,0.03)'],[0,-15,'rgba(100,160,120,0.03)'],[-15,YMIN,'rgba(14,203,129,0.06)']];
-        for(const[f,t,c]of zones){
-          const y1=h-((f-YMIN)/(YMAX-YMIN))*h,y2=h-((t-YMIN)/(YMAX-YMIN))*h;
-          ctx.fillStyle=c;ctx.fillRect(0,Math.min(y1,y2),w,Math.abs(y2-y1));
-        }
-        // Zero line
-        const zy=h-((0-YMIN)/(YMAX-YMIN))*h;
-        ctx.beginPath();ctx.moveTo(0,zy);ctx.lineTo(w,zy);ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=0.5;ctx.stroke();
-        // -25 threshold
-        const ty=h-((-25-YMIN)/(YMAX-YMIN))*h;
-        ctx.beginPath();ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.strokeStyle='rgba(14,203,129,0.2)';ctx.setLineDash([2,2]);ctx.lineWidth=0.5;ctx.stroke();ctx.setLineDash([]);
-
-        // F&G line
-        ctx.beginPath();
-        for(let j=0;j<fgArr.length;j++){
-          const x=j/(fgArr.length-1)*w;
-          const y=h-((fgArr[j]-YMIN)/(YMAX-YMIN))*h;
-          j===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
-        }
-        const cur=fgArr[fgArr.length-1];
-        ctx.strokeStyle=cur<-15?'#0ecb81':cur>15?'#f6465d':'#f0b90b';ctx.lineWidth=1.8;ctx.stroke();
-        // End dot
-        const lx=w-2,ly=h-((cur-YMIN)/(YMAX-YMIN))*h;
-        ctx.beginPath();ctx.arc(lx,ly,2.5,0,Math.PI*2);ctx.fillStyle=ctx.strokeStyle;ctx.fill();
-      }catch{}
-    }));
-    await new Promise(r=>setTimeout(r,150));
-  }
+  await fetchBulkOverlay(syms,mode);
 }
 
-function bulkChartSort(field,dir){
-  D.symbols=[...D.symbols].sort((a,b)=>{
-    const va=a[field]??0,vb=b[field]??0;
-    return dir*(va-vb);
-  });
-  renderBulkCharts();
+function setBulkRange(r){_bulkRange=r;renderBulkCharts()}
+
+async function fetchBulkOverlay(syms,mode){
+  if(_bulkChart){_bulkChart.destroy();_bulkChart=null}
+  const toFetch=syms.slice(0,mode==='lines'?30:150);
+  const rangeDays={'1M':30,'3M':90,'6M':180,'1Y':365,'2Y':730,'ALL':99999}[_bulkRange]||90;
+
+  // Fetch all in batches
+  const histories={};
+  for(let i=0;i<toFetch.length;i+=10){
+    const batch=toFetch.slice(i,i+10);
+    const results=await Promise.all(batch.map(async s=>{
+      try{const r=await fetch('/api/history/'+encodeURIComponent(s.s)+'?tf=D');const d=await r.json();return{sym:s.s,fg:(d.fg||[]).map(x=>x.v).slice(-rangeDays)};}catch{return null}
+    }));
+    results.filter(Boolean).filter(r=>r.fg.length>10).forEach(r=>histories[r.sym]=r.fg);
+    await new Promise(r=>setTimeout(r,100));
+  }
+
+  const valid=Object.keys(histories);
+  if(valid.length===0)return;
+  const maxLen=Math.max(...valid.map(s=>histories[s].length));
+  // Build date labels (approximate)
+  const labels=Array.from({length:maxLen},(_,i)=>{const d=new Date(Date.now()-(maxLen-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+
+  const cv=document.getElementById('bulkOvCv');if(!cv)return;
+  const COLORS=['#f7931a','#627eea','#00ffa3','#f6465d','#f0b90b','#8b5cf6','#06b6d4','#ec4899','#84cc16','#ffffff','#ff6b35','#a78bfa','#14b8a6','#f97316','#6366f1','#d946ef','#0ea5e9','#eab308','#22c55e','#ef4444','#3b82f6','#a855f7','#10b981','#f59e0b','#6ee7b7','#fca5a5','#93c5fd','#c4b5fd','#67e8f9','#fde047'];
+
+  const datasets=[];
+  if(mode==='lines'){
+    valid.forEach((sym,i)=>{
+      const fg=histories[sym];const padded=Array(maxLen-fg.length).fill(null).concat(fg);
+      datasets.push({label:sym,data:padded,borderColor:COLORS[i%COLORS.length],borderWidth:1.5,pointRadius:0,tension:0.3,spanGaps:true});
+    });
+  }else{
+    // Band mode: percentiles at each date
+    const p10=[],p25=[],med=[],p75=[],p90=[],avg=[];
+    for(let d=0;d<maxLen;d++){
+      const vals=valid.map(s=>{const fg=histories[s];const idx=fg.length-maxLen+d;return idx>=0?fg[idx]:null}).filter(v=>v!=null).sort((a,b)=>a-b);
+      if(vals.length<3){[p10,p25,med,p75,p90,avg].forEach(a=>a.push(null));continue}
+      const pctl=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p/100))];
+      p10.push(pctl(10));p25.push(pctl(25));med.push(pctl(50));p75.push(pctl(75));p90.push(pctl(90));
+      avg.push(Math.round(vals.reduce((s,v)=>s+v,0)/vals.length*10)/10);
+    }
+    datasets.push({data:p90,fill:'+1',backgroundColor:'rgba(246,70,93,0.06)',borderWidth:0,pointRadius:0,label:'90th'});
+    datasets.push({data:p10,fill:false,borderWidth:0,pointRadius:0,label:'10th'});
+    datasets.push({data:p75,fill:'+1',backgroundColor:'rgba(240,185,11,0.08)',borderWidth:0,pointRadius:0,label:'75th'});
+    datasets.push({data:p25,fill:false,borderWidth:0,pointRadius:0,label:'25th'});
+    datasets.push({data:med,borderColor:'#f0b90b',borderWidth:2.5,pointRadius:0,label:'Median',tension:0.3});
+    datasets.push({data:avg,borderColor:'#848e9c',borderWidth:1,borderDash:[4,2],pointRadius:0,label:'Average',tension:0.3});
+  }
+
+  _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets},
+    plugins:[dgtZoneBands],
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:mode==='lines',position:'top',labels:{color:'#848e9c',font:{size:9},usePointStyle:true,pointStyle:'line'}},
+        datalabels:{display:false},
+        zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}},
+        tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>{const v=ctx.raw;return v!=null?ctx.dataset.label+': '+(v>0?'+':'')+v.toFixed(1):null}}}},
+      scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:12,font:{size:9}}},
+        y:{min:-60,max:60,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v}}}}});
+
+  // Legend / outliers
+  const legend=document.getElementById('bulkLegend');
+  if(legend){
+    if(mode==='band'){
+      const sorted=[...syms].sort((a,b)=>(a.f||0)-(b.f||0));
+      const bottom=sorted.slice(0,5),top=sorted.slice(-5).reverse();
+      legend.innerHTML='<div style="display:flex;justify-content:space-between;flex-wrap:wrap">'+
+        '<div><span style="color:#0ecb81">▼ Most fearful:</span> '+bottom.map(s=>'<span style="color:#0ecb81;cursor:pointer" onclick="openDM(\''+s.s+'\')">'+s.s+'('+s.f?.toFixed(0)+')</span>').join(' ')+'</div>'+
+        '<div><span style="color:#f6465d">▲ Most greedy:</span> '+top.map(s=>'<span style="color:#f6465d;cursor:pointer" onclick="openDM(\''+s.s+'\')">'+s.s+'('+(s.f>0?'+':'')+s.f?.toFixed(0)+')</span>').join(' ')+'</div>'+
+        '</div><div style="color:#5e6673;margin-top:2px">'+valid.length+' symbols | Median: '+med[med.length-1]?.toFixed(1)+' | Band width: '+((p90[p90.length-1]||0)-(p10[p10.length-1]||0)).toFixed(0)+' pts | '+syms.filter(s=>(s.f||0)<-15).length+' in fear</div>';
+    }else{
+      legend.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:6px">'+
+        valid.map((sym,i)=>'<span style="color:'+COLORS[i%COLORS.length]+';cursor:pointer;font-size:11px" onclick="openDM(\''+sym+'\')">● '+sym+'</span>').join('')+'</div>';
+    }
+  }
 }
 
 // ─── Expandable Row Detail ──────────────────────────────────────────────────
