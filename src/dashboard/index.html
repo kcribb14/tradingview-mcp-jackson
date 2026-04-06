@@ -1405,7 +1405,8 @@ async function renderBulkCharts(){
   const mode=syms.length<=50?'lines':'band';
 
   container.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;flex-wrap:wrap">'+
-    '<span style="color:#5e6673;font-size:11px">'+syms.length+' symbols — '+(mode==='lines'?'individual lines':'distribution band')+' — shared Y</span>'+
+    '<div style="display:flex;gap:4px;align-items:center"><span style="color:#5e6673;font-size:11px">'+syms.length+' symbols</span>'+
+    '<button class="btn" onclick="renderSectorCompare()" style="font-size:10px;padding:2px 6px;border-color:#f0b90b44">Sector Compare</button></div>'+
     '<div style="display:flex;gap:3px">'+
     ['1M','3M','6M','1Y','2Y','ALL'].map(r=>'<button class="btn'+(r===_bulkRange?' active':'')+'" onclick="setBulkRange(\''+r+'\')" style="font-size:10px;padding:2px 6px">'+r+'</button>').join('')+
     '</div></div>'+
@@ -1416,6 +1417,46 @@ async function renderBulkCharts(){
 }
 
 function setBulkRange(r){_bulkRange=r;renderBulkCharts()}
+
+async function renderSectorCompare(){
+  if(_bulkChart){_bulkChart.destroy();_bulkChart=null}
+  const container=document.getElementById('chartsContainer');
+  container.innerHTML='<div style="padding:4px 8px"><span style="color:#5e6673;font-size:11px">Loading sector comparison...</span></div>'+
+    '<div style="position:relative;height:calc(100vh - 320px);min-height:380px"><canvas id="bulkOvCv"></canvas></div>'+
+    '<div id="bulkLegend" style="padding:4px 8px"></div>'+
+    '<div id="sectorTable" style="padding:4px 8px"></div>';
+  try{
+    const r=await fetch('/api/sector-comparison');
+    const d=await r.json();
+    if(!d.sectors)return;
+    const cv=document.getElementById('bulkOvCv');if(!cv)return;
+    const datasets=[];
+    for(const[name,s]of Object.entries(d.sectors)){
+      if(s.historyMedian?.length>5){
+        const maxLen=Math.max(...Object.values(d.sectors).filter(x=>x.historyMedian?.length>5).map(x=>x.historyMedian.length));
+        const pad=maxLen-s.historyMedian.length;
+        datasets.push({label:name+' ('+s.symbols+')',data:[...Array(pad>0?pad:0).fill(null),...s.historyMedian],borderColor:s.color||'#888',borderWidth:2,pointRadius:0,tension:0.3,spanGaps:true});
+      }
+    }
+    const maxLen=Math.max(...datasets.map(ds=>ds.data.length),1);
+    const labels=Array.from({length:maxLen},(_,i)=>{const dt=new Date(Date.now()-(maxLen-i)*86400000);return dt.toLocaleDateString('en-AU',{month:'short',year:'2-digit'})});
+    _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets},plugins:[dgtZoneBands],
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'top',labels:{color:'#eaecef',font:{size:10},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false},
+          zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}}},
+        scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:12,font:{size:9}}},
+          y:{min:-50,max:50,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v}}}}});
+    // Summary table
+    const tbl=document.getElementById('sectorTable');
+    if(tbl){
+      let rows=Object.entries(d.sectors).sort(([,a],[,b])=>a.median-b.median).map(([name,s])=>{
+        const sig=s.median<-20?'🟢 BUY':s.median>20?'🔴 EXIT':s.median<-10?'🟡 WATCH':'⚪ NEUTRAL';
+        return'<tr style="border-bottom:1px solid #1e2329"><td style="padding:3px 6px"><span style="color:'+s.color+'">●</span> '+name+'</td><td style="text-align:center">'+s.symbols+'</td><td style="text-align:center;color:'+(s.median<-15?'#0ecb81':s.median>15?'#f6465d':'#848e9c')+';font-weight:600">'+(s.median>0?'+':'')+s.median+'</td><td style="text-align:center">'+s.pctFear+'%</td><td style="text-align:center;font-size:10px">'+sig+'</td></tr>';
+      }).join('');
+      tbl.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:11px;color:#eaecef;margin-top:4px"><thead><tr style="border-bottom:2px solid #2b2f36"><th style="text-align:left;padding:4px 6px;color:#5e6673">Sector</th><th style="color:#5e6673">Symbols</th><th style="color:#5e6673">Median</th><th style="color:#5e6673">Fear%</th><th style="color:#5e6673">Signal</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    }
+  }catch(e){container.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
+}
 
 async function fetchBulkOverlay(syms,mode){
   if(_bulkChart){_bulkChart.destroy();_bulkChart=null}

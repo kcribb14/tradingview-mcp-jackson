@@ -919,6 +919,46 @@ app.post('/api/warm-category', async (req, res) => {
   })().catch(e => console.error('Warm error:', e.message));
 });
 
+// Sector comparison — median F&G per sector with history
+app.get('/api/sector-comparison', (req, res) => {
+  try {
+    const cache = getMemCache();
+    const groups = {
+      'Crypto': ['CRYPTO_MAJOR','CRYPTO_MID'], 'US Stocks': ['US_LARGE_CAP','US_MID_SMALL'],
+      'ASX Mining': ['ASX_MINING_MID','ASX_MINING_MICRO'], 'ASX Blue Chip': ['ASX_TOP50'],
+      'Commodities': ['COMMODITIES'], 'ETFs': ['ETFS'], 'DEX': ['DEX_SOLANA','DEX_OTHER'],
+      'International': ['CANADA_TSX','LONDON_LSE','HONG_KONG','JAPAN','INDIA','GERMANY','SOUTH_AFRICA'],
+    };
+    const SECTOR_COLORS = { Crypto:'#f7931a','US Stocks':'#627eea','ASX Mining':'#ffd700','ASX Blue Chip':'#00bcd4',Commodities:'#4caf50',ETFs:'#9e9e9e',DEX:'#e040fb',International:'#00e5ff' };
+    const sectors = {};
+    for (const [name, cats] of Object.entries(groups)) {
+      let syms = [];
+      for (const cat of cats) if (MASTER_UNIVERSE[cat]) syms.push(...MASTER_UNIVERSE[cat]);
+      const fgVals = [], histories = [];
+      for (const sym of syms) {
+        const e = cache[sym + ':D'];
+        if (!e || e.fgScore == null) continue;
+        fgVals.push(e.fgScore);
+        if (e.fgHistory?.length > 5) histories.push(e.fgHistory);
+      }
+      if (fgVals.length === 0) continue;
+      fgVals.sort((a, b) => a - b);
+      const median = fgVals[Math.floor(fgVals.length / 2)];
+      const avg = Math.round(fgVals.reduce((s, v) => s + v, 0) / fgVals.length * 10) / 10;
+      let histMedian = [];
+      if (histories.length >= 3) {
+        const maxLen = Math.max(...histories.map(h => h.length));
+        for (let d = 0; d < maxLen; d++) {
+          const vals = histories.map(h => { const i = h.length - maxLen + d; return i >= 0 ? h[i] : null; }).filter(v => v != null).sort((a, b) => a - b);
+          if (vals.length > 0) histMedian.push(Math.round(vals[Math.floor(vals.length / 2)] * 10) / 10);
+        }
+      }
+      sectors[name] = { symbols: fgVals.length, median: Math.round(median * 10) / 10, avg, pctFear: Math.round(fgVals.filter(v => v < -15).length / fgVals.length * 100), min: Math.round(fgVals[0] * 10) / 10, max: Math.round(fgVals[fgVals.length - 1] * 10) / 10, historyMedian: histMedian, color: SECTOR_COLORS[name] || '#888' };
+    }
+    res.json({ sectors });
+  } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
+});
+
 // Geological data endpoint
 app.get('/api/geology/:symbol', (req, res) => {
   const sym = req.params.symbol;
