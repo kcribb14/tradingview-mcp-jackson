@@ -467,7 +467,23 @@ async function fetchBars(sym, tf) {
   return null;
 }
 
-// Cache the latest F&G score from a time series into the scores cache
+// In-memory cache to prevent race conditions from concurrent load/save
+let _memCache = null;
+let _cacheDirty = false;
+
+function getMemCache() {
+  if (!_memCache) _memCache = loadCache();
+  return _memCache;
+}
+
+// Periodic save — writes to disk every 10 seconds if dirty
+setInterval(() => {
+  if (_cacheDirty && _memCache) {
+    try { _saveCache(_memCache); _cacheDirty = false; } catch {}
+  }
+}, 10000);
+
+// Cache the latest F&G score from a time series into the in-memory cache
 function cacheScore(sym, tf, series, bars) {
   if (!series || series.length === 0) return;
   const last = series[series.length - 1];
@@ -475,10 +491,10 @@ function cacheScore(sym, tf, series, bars) {
   const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
   const price = lastBar?.close || last.close || 0;
   const chg = prevBar?.close > 0 ? Math.round(((lastBar.close / prevBar.close) - 1) * 10000) / 100 : 0;
-  const cache = loadCache();
+  const cache = getMemCache();
   const key = `${sym}:${tf}`;
   cache[key] = {
-    ...(cache[key] || {}), // preserve existing fields
+    ...(cache[key] || {}),
     lastScanTime: new Date().toISOString(),
     fgScore: Math.max(-80, Math.min(100, Math.round(last.fg_score * 100) / 100)),
     zone: last.zone,
@@ -487,7 +503,7 @@ function cacheScore(sym, tf, series, bars) {
     volume: lastBar?.volume || 0,
     barCount: bars.length,
   };
-  _saveCache(cache);
+  _cacheDirty = true; // Will be saved by the periodic writer
 }
 
 // Track recently viewed symbols for background worker
@@ -807,10 +823,10 @@ app.post('/api/warm-category', async (req, res) => {
           }
         } catch {}
       }));
-      if (i % 100 === 0 && i > 0) { _saveCache(loadCache()); rebuildData(); }
+      if (i % 100 === 0 && i > 0) { _saveCache(getMemCache()); rebuildData(); }
       await new Promise(r => setTimeout(r, 300));
     }
-    _saveCache(loadCache());
+    _saveCache(getMemCache());
     rebuildData();
   })().catch(e => console.error('Warm error:', e.message));
 });
