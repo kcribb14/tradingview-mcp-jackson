@@ -285,7 +285,7 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
 <div class="dm-bg" id="dmBg" onclick="if(event.target===this)closeDM()">
   <div class="dm">
     <div class="dm-h">
-      <h2><span id="dmSym">—</span><span class="fg z3" id="dmFG">—</span><span class="star" id="dmStar" onclick="toggleFavDM()">☆</span></h2>
+      <h2><span id="dmSym">—</span><span id="dmCatLabel" style="font-size:11px;color:#666;font-weight:400;margin-left:6px"></span><span class="fg z3" id="dmFG">—</span><span class="star" id="dmStar" onclick="toggleFavDM()">☆</span></h2>
       <div style="display:flex;gap:6px;align-items:center">
         <span id="dmPrice" style="font-size:12px;color:#848e9c">—</span>
         <div id="dmTFButtons" style="display:flex;gap:3px"></div>
@@ -1686,7 +1686,7 @@ async function openDM(sym,cat){
   dmSym=sym;dmCat=cat||'';dmTF='D';dmCompSym='';
   const cmpSel=document.getElementById('dmCompare');if(cmpSel)cmpSel.value='';
   document.getElementById('dmBg').classList.add('open');
-  document.getElementById('dmSym').textContent=sym;document.getElementById('dmPrice').textContent='...';
+  document.getElementById('dmSym').textContent=sym;document.getElementById('dmCatLabel').textContent=cat?' · '+cat:'';document.getElementById('dmPrice').textContent='...';
   document.getElementById('dmStar').className='star '+(FAVS.includes(sym)?'on':'');document.getElementById('dmStar').textContent=FAVS.includes(sym)?'★':'☆';
   try{const r=await fetch('/api/available-tfs/'+encodeURIComponent(sym));dmAvailTFs=(await r.json()).available||{}}catch{dmAvailTFs={D:true}}
   renderTFButtons();
@@ -2614,7 +2614,8 @@ function buildSectorAccordion(allRows, sectorData){
     });
     h+='</tbody></table>';
     if(syms.length>5){
-      h+='<div style="text-align:center;margin-top:4px"><button onclick="switchView(\'scanner\')" style="padding:3px 12px;background:#222;color:#888;border:1px solid #444;border-radius:4px;cursor:pointer;font-size:10px">Show all '+syms.length+' in Scanner</button></div>';
+      const catList=cfg.cats.map(c=>"'"+c+"'").join(',');
+      h+='<div style="text-align:center;margin-top:4px"><button onclick="selectedCats=new Set(['+catList+']);showWL=false;switchView(\'scanner\');setTimeout(()=>{renderCatBar();loadPage(1)},100)" style="padding:3px 12px;background:#222;color:#888;border:1px solid #444;border-radius:4px;cursor:pointer;font-size:10px">Show all '+syms.length+' in Scanner</button></div>';
     }
     h+='</div></div>';
   }
