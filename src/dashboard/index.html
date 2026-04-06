@@ -129,6 +129,8 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   .dm-close{font-size:24px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
   .wg-cell{min-width:0}.wg-chart{height:160px}
   #wgGrid{grid-template-columns:1fr}
+  .cmd-two-col{grid-template-columns:1fr!important}
+  .cmd-gauges{grid-template-columns:1fr 1fr 1fr}
 }
 </style>
 </head>
@@ -2321,149 +2323,222 @@ async function loadWgChart(sym){
   }catch(e){console.error('WG chart error for '+sym+':',e)}
 }
 
-// ─── Signals View ───────────────────────────────────────────────────────────
+// ─── Command Center (Signals View) ──────────────────────────────────────────
+let cmdSectorChartInstance=null;
 async function loadSignals(){
   const el=document.getElementById('signalsContent');
-  el.innerHTML='<div style="text-align:center;padding:20px;color:#848e9c">Loading signals...</div>';
+  el.innerHTML='<div style="text-align:center;padding:20px;color:#848e9c">Loading command center...</div>';
   try{
-    const [cachedR, cycleR]=await Promise.all([
-      fetch('/api/cached?limit=500&sort=sq&order=desc'),
-      fetch('/api/cycle').catch(()=>null)
+    const [cachedR,cycleR,sectorsR,unreactedR,perfR,healthR]=await Promise.all([
+      fetch('/api/cached?limit=500&sort=sq&order=desc').then(r=>r.json()),
+      fetch('/api/cycle').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/sector-comparison').then(r=>r.json()).catch(()=>({sectors:{}})),
+      fetch('/api/unreacted').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/performance').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/health').then(r=>r.json()).catch(()=>({}))
     ]);
-    const d=await cachedR.json();
-    const cycle=cycleR?await cycleR.json():null;
-    const rows=d.symbols||[];
+    const rows=cachedR.symbols||[];
     const entry=rows.filter(r=>r.w==='ENTRY ZONE');
-    const watching=rows.filter(r=>r.w==='WATCHING').sort((a,b)=>a.f-b.f);
-
-    const entryRanked=[...entry].sort((a,b)=>(b.sq||b.ss||0)-(a.sq||a.ss||0));
+    const entryRanked=[...entry].sort((a,b)=>(b.sq||0)-(a.sq||0));
     const gradeA=entryRanked.filter(r=>(r.sg||'D')==='A');
     const gradeB=entryRanked.filter(r=>(r.sg||'D')==='B');
+    const watching=rows.filter(r=>r.w==='WATCHING').sort((a,b)=>a.f-b.f);
 
-    // ─── Daily Briefing ───
-    const now=new Date();
-    const dateStr=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-    const ms=cycle?.macroStage||{};
-    const phaseShort=ms.name||cycle?.phase?.split('—')[0]?.trim()||'Unknown';
+    const ms=cycleR?.macroStage||{};
+    const phase=ms.name||cycleR?.phase?.split('—')[0]?.trim()||'?';
     const phaseCol={'RECESSION':'#3b82f6','EARLY RECOVERY':'#22c55e','EXPANSION':'#0ecb81','LATE EXPANSION':'#f0b90b','SLOWDOWN':'#ff9800','CONTRACTION':'#f6465d'}[ms.name]||'#f0b90b';
-    const topSig=gradeA[0]||gradeB[0];
-    const topStr=topSig?topSig.s+' (Score '+topSig.sq+', '+(topSig.sf||[])[0]?.name+')':'None';
-    const altStr=cycle?.altSeason?.label||'Unknown';
-    // Find biggest lag opportunity
-    const biggestLag=cycle?.leadLag?.reduce((best,l)=>(l.gap||0)>(best?.gap||0)?l:best,null);
-    const lagStr=biggestLag&&biggestLag.gap>5?biggestLag.names[1]+' lagging '+biggestLag.names[0]+' by '+biggestLag.gap+' pts':'No major divergences';
+    const breadth=cycleR?.breadth||{};
+    const altPct=cycleR?.altSeason?.pct??cycleR?.altSeasonPct??'?';
+    const riskLabel=(ms.name==='SLOWDOWN'||ms.name==='CONTRACTION'||ms.name==='RECESSION')?'RISK OFF':'RISK ON';
+    const riskCol=riskLabel==='RISK OFF'?'#f6465d':'#0ecb81';
 
-    let html='<div class="sig-briefing">';
-    html+='<div class="date">'+dateStr+'</div>';
-    html+='<div class="phase" style="color:'+phaseCol+'">'+phaseShort+'</div>';
-    html+='<div>'+gradeA.length+' Grade A signals'+(gradeA.length>0?', led by '+topStr:'')+'. ';
-    html+=altStr+'. '+lagStr+'. ';
-    html+='Market breadth: '+(cycle?.breadth?Object.entries(cycle.breadth).map(([k,v])=>k+' '+v+'%').join(', '):'—')+' above EMA.';
-    if(ms.buy?.length)html+=' <b style="color:#0ecb81">Buy:</b> '+ms.buy.join(', ')+'.';
-    if(ms.avoid?.length)html+=' <b style="color:#f6465d">Avoid:</b> '+ms.avoid.join(', ')+'.';
-    html+='</div>';
-    html+='</div>';
+    // Key asset F&G
+    const ka=cachedR.keyAssets||[];
+    const sectorEntries=Object.entries(sectorsR.sectors||{}).sort((a,b)=>a[1].median-b[1].median);
+    const deepest=sectorEntries[0];
+    const strongest=sectorEntries[sectorEntries.length-1];
 
-    // ─── Top Bar Pills ───
-    html+='<div class="sig-topbar">';
-    const ka=d.keyAssets||[];
-    for(const a of ka){
-      const col=fgColor(a.f);
-      html+='<div class="tb-pill"><span class="tb-val" style="color:'+col+'">'+(a.f>0?'+':'')+a.f.toFixed(1)+'</span>'+a.s+'</div>';
+    // Top 20 opportunities: grade A first, then B, then by score
+    const topOpps=[...gradeA,...gradeB,...entryRanked.filter(r=>r.sg!=='A'&&r.sg!=='B')].slice(0,20);
+
+    // Unreacted catalysts
+    const unreactedList=unreactedR?.unreacted||[];
+
+    let h='';
+
+    // ═══ MARKET STATUS BAR ═══
+    h+='<div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:10px 14px;margin-bottom:8px">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
+    h+='<div style="display:flex;gap:10px;align-items:center">';
+    h+='<span style="background:'+riskCol+';color:#fff;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:12px">'+riskLabel+'</span>';
+    h+='<span style="color:'+phaseCol+';font-weight:600;font-size:12px">Stage: '+phase+'</span>';
+    h+='<span style="color:#888;font-size:12px">Alt Season: '+altPct+'%</span>';
+    h+='</div>';
+    h+='<div style="display:flex;gap:8px;font-size:11px">';
+    h+='<span style="color:#666">Breadth:</span>';
+    for(const [k,v] of Object.entries(breadth)){h+='<span style="color:'+(v>50?'#0ecb81':'#f6465d')+'">'+k+' '+v+'%</span>'}
+    h+='</div></div>';
+    h+='<div style="display:flex;gap:14px;margin-top:6px;font-size:12px;flex-wrap:wrap">';
+    for(const a of ka){const v=a.f||0;h+='<span style="color:'+(v<-10?'#0ecb81':v>10?'#f6465d':'#888')+'">'+a.s+' '+(v>0?'+':'')+v.toFixed(1)+'</span>'}
+    h+='<span style="color:#555;margin-left:auto">'+(healthR.symbols||'?')+' symbols</span>';
+    h+='</div></div>';
+
+    // ═══ TWO COLUMNS: SECTOR CHART + RANKING ═══
+    h+='<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px" class="cmd-two-col">';
+    // Left: sector chart
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px">';
+    h+='<div style="color:#888;font-size:11px;margin-bottom:4px">SECTOR F&G COMPARISON — which sectors are cheapest?</div>';
+    h+='<div style="position:relative;height:180px"><canvas id="cmdSectorChart"></canvas></div>';
+    h+='<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:4px">';
+    h+='<span>Deepest: <span style="color:#0ecb81">'+(deepest?deepest[0]+' ('+deepest[1].median+')':'?')+'</span></span>';
+    h+='<span>Strongest: <span style="color:#f6465d">'+(strongest?strongest[0]+' ('+(strongest[1].median>0?'+':'')+strongest[1].median+')':'?')+'</span></span>';
+    h+='</div></div>';
+    // Right: sector ranking
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px">';
+    h+='<div style="color:#888;font-size:11px;margin-bottom:6px">SECTOR RANKING</div>';
+    for(const [name,s] of sectorEntries){
+      const col=s.median<-15?'#0ecb81':s.median>15?'#f6465d':'#aaa';
+      const pctBar=Math.min(100,Math.max(0,(s.median+40)/80*100));
+      h+='<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #1a1a1a;font-size:11px;cursor:pointer" onclick="switchView(\'scanner\');setTimeout(()=>{const b=document.querySelector(\'.cat-bar .btn[data-cat=\\\''+name+'\\\']\');if(b)b.click()},100)">';
+      h+='<span style="color:#ccc;min-width:80px">'+name+'</span>';
+      h+='<div style="flex:1;height:6px;background:#1a1a1a;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pctBar+'%;background:linear-gradient(90deg,#0ecb81,#f0b90b,#f6465d);border-radius:3px"></div></div>';
+      h+='<span style="color:'+col+';font-weight:bold;min-width:40px;text-align:right">'+(s.median>0?'+':'')+s.median+'</span>';
+      h+='<span style="font-size:9px;color:#666;min-width:20px">'+s.symbols+'</span>';
+      h+='</div>';
     }
-    html+='<div class="tb-pill"><span class="tb-val" style="color:#0ecb81">'+gradeA.length+'</span>Grade A</div>';
-    html+='<div class="tb-pill"><span class="tb-val" style="color:#f0b90b">'+gradeB.length+'</span>Grade B</div>';
-    html+='<div class="tb-pill"><span class="tb-val">'+(d.signals?.entry||0)+'</span>Entry Zones</div>';
-    html+='</div>';
+    h+='</div></div>';
 
-    // ─── Grade A Signal Cards ───
-    if(gradeA.length>0){
-      html+='<div class="sig-section"><div class="sig-title" style="color:#0ecb81">GRADE A — HIGH CONVICTION ('+gradeA.length+')</div>';
-      for(const r of gradeA.slice(0,10)){
-        const pr=r.p>=1?'$'+r.p.toFixed(2):r.p>0.001?'$'+r.p.toFixed(4):'$'+r.p?.toExponential(2);
-        html+='<div class="sig-card grade-a" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">';
-        html+='<div class="sc-hdr"><span class="sc-sym">'+r.s+'</span><span class="sc-score" style="color:#0ecb81">'+r.sq+'/100 Grade A</span></div>';
-        html+='<div class="sc-meta">'+r.c+' &nbsp; '+pr+' &nbsp; F&G: '+fgBadge(r.f)+' &nbsp; '+(r.wh==='ACC'?'🐋 Whale Accumulation':'')+'</div>';
-        html+='<div class="sc-bar"><div class="sc-bar-fill" style="width:'+r.sq+'%;background:#0ecb81"></div></div>';
-        html+='<div class="sc-factors">';
-        (r.sf||[]).forEach(f=>{
-          html+='<div class="sc-factor"><span>'+f.name+': '+f.val+'</span><span style="color:#0ecb81">'+f.pts+'/'+f.max+'</span></div>';
-        });
-        html+='</div></div>';
-      }
-      html+='</div>';
-    }
-
-    // ─── Grade B Table ───
-    function sigRow(r){
+    // ═══ TOP OPPORTUNITIES TABLE ═══
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px;margin-bottom:8px">';
+    h+='<div style="color:#f0b90b;font-size:12px;font-weight:bold;margin-bottom:6px">TOP OPPORTUNITIES — ranked by conviction across ALL asset classes</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;color:#ccc">';
+    h+='<thead><tr style="border-bottom:1px solid #333;color:#888"><th style="text-align:left;padding:4px">#</th><th style="text-align:left;padding:4px">Symbol</th><th style="text-align:left;padding:4px">Class</th><th style="padding:4px">Price</th><th style="padding:4px">Chg%</th><th style="padding:4px">F&G</th><th style="padding:4px">Score</th><th style="padding:4px">Grade</th><th style="padding:4px">Signal</th></tr></thead><tbody>';
+    for(let i=0;i<topOpps.length;i++){
+      const r=topOpps[i];
+      const fg=r.f||0;const chg=r.ch||0;const price=r.p||0;
+      const fgCol=fg<-15?'#0ecb81':fg>15?'#f6465d':'#888';
       const gCol={'A':'#0ecb81','B':'#f0b90b','C':'#848e9c','D':'#5e6673'}[r.sg||'D']||'#848e9c';
-      return'<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td style="font-weight:700;color:'+gCol+'">'+(r.sg||'?')+'</td><td style="font-weight:600">'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td style="color:'+gCol+';font-weight:600">'+(r.sq||0)+'</td><td style="font-size:10px">'+(r.wh==='ACC'?'🐋':'—')+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p>0.001?r.p.toFixed(4):r.p?.toExponential(2)||'—')+'</td></tr>';
+      const pr=price>=1?'$'+price.toFixed(2):price>0.001?'$'+price.toFixed(4):price>0?'$'+price.toExponential(2):'—';
+      h+='<tr style="border-bottom:1px solid #1a1a1a;cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">';
+      h+='<td style="padding:4px;color:#555">'+(i+1)+'</td>';
+      h+='<td style="padding:4px;font-weight:bold">'+r.s+'</td>';
+      h+='<td style="padding:4px;color:#666;font-size:10px">'+(r.c||'').replace(/_/g,' ')+'</td>';
+      h+='<td style="padding:4px">'+pr+'</td>';
+      h+='<td style="padding:4px;color:'+(chg>=0?'#0ecb81':'#f6465d')+'">'+(chg!==0?(chg>0?'+':'')+chg.toFixed(1)+'%':'—')+'</td>';
+      h+='<td style="padding:4px;font-weight:bold;color:'+fgCol+'">'+(fg>0?'+':'')+fg.toFixed(1)+'</td>';
+      h+='<td style="padding:4px;color:'+gCol+';font-weight:600">'+(r.sq||0)+'</td>';
+      h+='<td style="padding:4px;font-weight:700;color:'+gCol+'">'+(r.sg||'—')+'</td>';
+      h+='<td style="padding:4px;font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">Whale</span> ':'')+(r.w||'')+'</td>';
+      h+='</tr>';
     }
-    if(gradeB.length>0){
-      html+='<div class="sig-section"><div class="sig-title" style="color:#f0b90b">GRADE B — MODERATE ('+gradeB.length+', showing top 20)</div>';
-      html+='<table class="sig-table"><tr><th>G</th><th>Symbol</th><th>Class</th><th>F&G</th><th>Score</th><th>Whale</th><th>Price</th></tr>';
-      gradeB.slice(0,20).forEach(r=>{html+=sigRow(r)});
-      html+='</table></div>';
-    }
+    h+='</tbody></table></div>';
 
-    // ─── Watching ───
-    // Unreacted Drill Results — highest alpha
-    try{
-      const ur=await fetch('/api/unreacted');const urd=await ur.json();
-      if(urd.unreacted?.length>0){
-        html+='<div class="sig-section"><div class="sig-title" style="color:#ff9800">⚠️ UNREACTED DRILL RESULTS — Market missed these ('+urd.count+')</div>';
-        for(const u of urd.unreacted.slice(0,5)){
-          const rx=u.report.reaction;
-          const statusCol=rx.status==='CONTRARIAN_BUY'?'#0ecb81':'#ff9800';
-          const statusLabel=rx.status==='CONTRARIAN_BUY'?'🎯 CONTRARIAN BUY':'⚠️ UNREACTED';
-          html+='<div class="sig-card" style="border-color:'+statusCol+'44;background:'+statusCol+'08" onclick="openDM(\''+u.ticker+'\')">';
-          html+='<div class="sc-hdr"><span class="sc-sym">'+u.ticker+'</span><span style="color:'+statusCol+';font-weight:700">'+statusLabel+'</span></div>';
-          html+='<div style="font-size:12px;font-weight:600;color:#eaecef;margin:4px 0">'+u.report.title+'</div>';
-          html+='<div style="font-size:11px;color:#eaecef">Best: <b>'+u.report.best+'</b> | '+u.report.quality+(u.report.extension?' | Extension':'')+'</div>';
-          html+='<div style="font-size:11px;margin-top:4px">30d reaction: <b style="color:'+(rx.d30>0?'#0ecb81':'#f6465d')+'">'+(rx.d30>0?'+':'')+rx.d30+'%</b> (expected: <b>+'+rx.expected+'%</b>)</div>';
-          html+='<div style="font-size:10px;color:#848e9c;margin-top:2px">F&G: '+(u.fg!=null?u.fg:'—')+' | GeoScore: '+u.geoScore+' '+u.geoPctl+' | Price: $'+(u.currentPrice>=1?u.currentPrice?.toFixed(2):u.currentPrice?.toExponential(2)||'—')+'</div>';
-          html+='</div>';
-        }
-        html+='</div>';
+    // ═══ UNREACTED CATALYSTS ═══
+    if(unreactedList.length>0){
+      h+='<div style="background:#111;border:1px solid #ff980044;border-radius:6px;padding:8px;margin-bottom:8px">';
+      h+='<div style="color:#ff9800;font-size:12px;font-weight:bold;margin-bottom:6px">UNREACTED CATALYSTS — good results the market MISSED</div>';
+      for(const u of unreactedList.slice(0,5)){
+        const rx=u.report?.reaction||{};
+        const statusCol=rx.status==='CONTRARIAN_BUY'?'#0ecb81':'#ff9800';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-bottom:1px solid #1a1a1a;font-size:12px;cursor:pointer;gap:8px" onclick="openDM(\''+u.ticker+'\')">';
+        h+='<span style="color:#fff;font-weight:bold;min-width:70px">'+u.ticker+'</span>';
+        h+='<span style="color:#ccc;flex:1">'+u.report.title+'</span>';
+        h+='<span style="color:#f0b90b">'+u.report.quality+'</span>';
+        h+='<span style="color:'+(rx.d30>0?'#0ecb81':'#f6465d')+'">Expected +'+(rx.expected||'?')+'% → Actual '+(rx.d30>0?'+':'')+rx.d30+'%</span>';
+        h+='<span style="color:'+statusCol+';font-weight:600;font-size:10px">'+rx.status+'</span>';
+        h+='</div>';
       }
-    }catch{}
-
-    if(watching.length>0){
-      html+='<div class="sig-section"><div class="sig-title">APPROACHING FEAR ('+(d.signals?.watching||0)+' total, top 15)</div>';
-      html+='<table class="sig-table"><tr><th>Symbol</th><th>Class</th><th>F&G</th><th>Price</th></tr>';
-      watching.slice(0,15).forEach(r=>{
-        html+='<tr style="cursor:pointer" onclick="openDM(\''+r.s+'\',\''+r.c+'\')"><td>'+r.s+'</td><td style="color:#848e9c;font-size:11px">'+r.c+'</td><td>'+fgBadge(r.f)+'</td><td>$'+(r.p>=1?r.p.toFixed(2):r.p?.toExponential(2)||'—')+'</td></tr>';
-      });
-      html+='</table></div>';
+      h+='</div>';
     }
 
-    // Load forward performance
-    try{
-      const pr=await fetch('/api/performance');const perf=await pr.json();
-      if(perf.totalSignals>0){
-        html+='<div class="sig-section"><div class="sig-title">FORWARD TRACKING (live since '+(perf.started?.slice(0,10)||'?')+')</div>';
-        html+='<div class="sig-topbar">';
-        html+='<div class="tb-pill"><span class="tb-val">'+perf.totalSignals+'</span>Tracked</div>';
-        html+='<div class="tb-pill"><span class="tb-val">'+perf.openSignals+'</span>Open</div>';
-        html+='<div class="tb-pill"><span class="tb-val">'+perf.closedSignals+'</span>Closed</div>';
-        if(perf.winRate!=null)html+='<div class="tb-pill"><span class="tb-val" style="color:'+(perf.winRate>=50?'#0ecb81':'#f6465d')+'">'+perf.winRate+'%</span>Win Rate</div>';
-        if(perf.avgReturn!=null)html+='<div class="tb-pill"><span class="tb-val" style="color:'+(perf.avgReturn>=0?'#0ecb81':'#f6465d')+'">'+(perf.avgReturn>0?'+':'')+perf.avgReturn+'%</span>Avg Return</div>';
-        html+='</div>';
-        if(perf.recentSignals?.length>0){
-          html+='<table class="sig-table"><tr><th>Symbol</th><th>Grade</th><th>Entry</th><th>Current</th><th>P&L</th><th>Days</th><th>Status</th></tr>';
-          perf.recentSignals.slice(0,10).forEach(s=>{
-            const pnlCol=(s.pnl||0)>0?'#0ecb81':(s.pnl||0)<0?'#f6465d':'#848e9c';
-            html+='<tr><td style="font-weight:600">'+s.symbol+'</td><td>'+(s.grade||'?')+'</td><td>$'+(s.entryPrice>=1?s.entryPrice.toFixed(2):s.entryPrice?.toExponential(2)||'?')+'</td><td>$'+(s.currentPrice>=1?s.currentPrice?.toFixed(2):s.currentPrice?.toExponential(2)||'?')+'</td><td style="color:'+pnlCol+';font-weight:600">'+(s.pnl!=null?(s.pnl>0?'+':'')+s.pnl+'%':'—')+'</td><td>'+(s.daysHeld||0)+'d</td><td style="font-size:10px">'+(s.status||'?')+'</td></tr>';
-          });
-          html+='</table>';
-        }
-        html+='</div>';
-      }
-    }catch{}
+    // ═══ CYCLE GAUGES (compact row) ═══
+    const avgFG=cachedR.stats?.avgFG||cycleR?.marketAvgFG||-4;
+    const avgFGCol=avgFG<-20?'#0ecb81':avgFG<-10?'#ff9800':avgFG>10?'#f6465d':'#aaa';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px" class="cmd-gauges">';
+    // Market F&G gauge
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:10px;text-align:center">';
+    h+='<div style="color:#888;font-size:10px">MARKET F&G</div>';
+    h+='<div style="font-size:28px;font-weight:bold;color:'+avgFGCol+'">'+avgFG.toFixed(1)+'</div>';
+    h+='<div style="color:#888;font-size:10px">'+(avgFG<-20?'FEAR':avgFG<-10?'WEAK FEAR':avgFG>10?'GREED':'NEUTRAL')+'</div></div>';
+    // Alt Season gauge
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:10px;text-align:center">';
+    h+='<div style="color:#888;font-size:10px">ALT SEASON</div>';
+    h+='<div style="font-size:28px;font-weight:bold;color:#f0b90b">'+altPct+'%</div>';
+    h+='<div style="color:#888;font-size:10px">'+((typeof altPct==='number'?altPct:0)<25?'BTC SEASON':'ALT SEASON')+'</div></div>';
+    // Risk gauge
+    h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:10px;text-align:center">';
+    h+='<div style="color:#888;font-size:10px">RISK APPETITE</div>';
+    h+='<div style="font-size:28px;font-weight:bold;color:'+riskCol+'">'+riskLabel.split(' ')[1]+'</div>';
+    h+='<div style="color:#888;font-size:10px">'+(riskLabel==='RISK OFF'?'Safety leads risk':'Risk assets lead')+'</div></div>';
+    h+='</div>';
 
-    el.innerHTML=html;
-    document.getElementById('navSignals').textContent='Signals ('+entry.length+')';
+    // ═══ GRADE A CARDS (collapsed, expandable) ═══
+    if(gradeA.length>0){
+      h+='<div style="background:#0ecb8108;border:1px solid #0ecb8133;border-radius:6px;padding:8px;margin-bottom:8px">';
+      h+='<div style="color:#0ecb81;font-size:12px;font-weight:bold;margin-bottom:6px">GRADE A — HIGH CONVICTION ('+gradeA.length+')</div>';
+      for(const r of gradeA.slice(0,6)){
+        const pr=r.p>=1?'$'+r.p.toFixed(2):r.p>0.001?'$'+r.p.toFixed(4):'$'+(r.p?.toExponential(2)||'?');
+        h+='<div class="sig-card grade-a" onclick="openDM(\''+r.s+'\',\''+r.c+'\')">';
+        h+='<div class="sc-hdr"><span class="sc-sym">'+r.s+'</span><span class="sc-score" style="color:#0ecb81">'+r.sq+'/100</span></div>';
+        h+='<div class="sc-meta">'+r.c+' · '+pr+' · F&G: '+fgBadge(r.f)+(r.wh==='ACC'?' · Whale':'')+'</div>';
+        h+='<div class="sc-bar"><div class="sc-bar-fill" style="width:'+r.sq+'%;background:#0ecb81"></div></div>';
+        h+='</div>';
+      }
+      h+='</div>';
+    }
+
+    // ═══ FORWARD TRACKING (compact) ═══
+    if(perfR&&perfR.totalSignals>0){
+      h+='<div style="background:#111;border:1px solid #222;border-radius:6px;padding:8px;margin-bottom:8px">';
+      h+='<div style="display:flex;justify-content:space-between;font-size:12px;flex-wrap:wrap;gap:8px">';
+      h+='<span style="color:#888">FORWARD TRACKING: '+perfR.totalSignals+' signals</span>';
+      if(perfR.winRate!=null)h+='<span style="color:'+(perfR.winRate>=50?'#0ecb81':'#f6465d')+'">WR: '+perfR.winRate+'%</span>';
+      if(perfR.avgReturn!=null)h+='<span style="color:'+(perfR.avgReturn>=0?'#0ecb81':'#f6465d')+'">Avg: '+(perfR.avgReturn>0?'+':'')+perfR.avgReturn+'%</span>';
+      h+='<span style="color:#888">Open: '+(perfR.openSignals||0)+' · Closed: '+(perfR.closedSignals||0)+'</span>';
+      h+='</div></div>';
+    }
+
+    // ═══ QUICK LINKS ═══
+    h+='<div style="display:flex;gap:8px;justify-content:center;padding:8px">';
+    h+='<button class="btn" onclick="switchView(\'scanner\')">Open Full Scanner</button>';
+    h+='<button class="btn" onclick="switchView(\'watchgrid\')">Open Watchlist</button>';
+    h+='<button class="btn" onclick="switchView(\'cycle\')">Open Cycle Detail</button>';
+    h+='</div>';
+
+    el.innerHTML=h;
+    document.getElementById('navSignals').textContent='Command ('+(gradeA.length+gradeB.length)+')';
+
+    // ═══ RENDER SECTOR CHART ═══
+    renderCmdSectorChart(sectorsR);
   }catch(e){el.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
+}
+
+function renderCmdSectorChart(data){
+  const cv=document.getElementById('cmdSectorChart');
+  if(!cv||!data?.sectors)return;
+  if(cmdSectorChartInstance){cmdSectorChartInstance.destroy();cmdSectorChartInstance=null}
+  const entries=Object.entries(data.sectors);
+  const datasets=[];let maxLen=0;
+  for(const [name,sec] of entries){
+    if(!sec.historyMedian||sec.historyMedian.length<10)continue;
+    maxLen=Math.max(maxLen,sec.historyMedian.length);
+    datasets.push({label:name,data:sec.historyMedian,borderColor:sec.color||'#888',borderWidth:1.5,pointRadius:0,tension:0.3});
+  }
+  if(datasets.length===0)return;
+  datasets.forEach(ds=>{const pad=maxLen-ds.data.length;if(pad>0)ds.data=Array(pad).fill(null).concat(ds.data)});
+  const labels=Array.from({length:maxLen},(_,i)=>{const d=new Date(Date.now()-(maxLen-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+  cmdSectorChartInstance=new Chart(cv,{type:'line',data:{labels,datasets},options:{
+    responsive:true,maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:true,position:'bottom',labels:{color:'#888',font:{size:9},usePointStyle:true,padding:6}},tooltip:{mode:'index',intersect:false},datalabels:{display:false}},
+    scales:{y:{min:-40,max:40,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#555',font:{size:9}}},x:{display:false}}
+  },plugins:[{beforeDraw(chart){
+    const{ctx:c,chartArea:{top,bottom,left,right},scales:{y}}=chart;
+    [{from:40,to:10,c:'rgba(246,70,93,0.04)'},{from:-10,to:-40,c:'rgba(14,203,129,0.04)'}].forEach(z=>{
+      const y1=y.getPixelForValue(z.from),y2=y.getPixelForValue(z.to);
+      c.fillStyle=z.c;c.fillRect(left,Math.min(y1,y2),right-left,Math.abs(y2-y1));
+    });
+  }}]});
 }
 
 // Keyboard shortcuts
