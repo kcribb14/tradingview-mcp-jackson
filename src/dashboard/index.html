@@ -213,10 +213,12 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn active" id="vTable" onclick="setScannerView('table')" style="font-size:11px;padding:3px 10px">Table</button>
   <button class="btn" id="vHeatmap" onclick="setScannerView('heatmap')" style="font-size:11px;padding:3px 10px">Heatmap</button>
   <button class="btn" id="vCards" onclick="setScannerView('cards')" style="font-size:11px;padding:3px 10px">Cards</button>
+  <button class="btn" id="vCharts" onclick="setScannerView('charts')" style="font-size:11px;padding:3px 10px">Charts</button>
 </div>
 <div id="tableContainer" style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div id="heatmapContainer" style="display:none;padding:4px;min-height:300px"></div>
 <div id="cardsContainer" style="display:none;padding:4px"></div>
+<div id="chartsContainer" style="display:none;overflow-y:auto;max-height:calc(100vh - 280px)"></div>
 </div>
 <!-- Watchlist Grid view -->
 <div id="viewWatchgrid" class="tab-hidden" style="padding:12px">
@@ -873,15 +875,20 @@ function goPage(d){curPage=Math.max(1,Math.min(D.pages||1,curPage+d));loadPage(c
 let scannerViewMode='table';
 function setScannerView(mode){
   scannerViewMode=mode;
+  ['tableContainer','heatmapContainer','cardsContainer','chartsContainer'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display=id.startsWith(mode.replace('s',''))||id===mode+'Container'?'':'none';
+  });
   document.getElementById('tableContainer').style.display=mode==='table'?'':'none';
   document.getElementById('heatmapContainer').style.display=mode==='heatmap'?'':'none';
   document.getElementById('cardsContainer').style.display=mode==='cards'?'':'none';
-  document.getElementById('vTable').classList.toggle('active',mode==='table');
-  document.getElementById('vHeatmap').classList.toggle('active',mode==='heatmap');
-  document.getElementById('vCards').classList.toggle('active',mode==='cards');
+  document.getElementById('chartsContainer').style.display=mode==='charts'?'':'none';
+  ['vTable','vHeatmap','vCards','vCharts'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.classList.toggle('active',id==='v'+mode.charAt(0).toUpperCase()+mode.slice(1));
+  });
   const pager=document.getElementById('pager');if(pager)pager.className=mode==='table'?pager.className.replace('scanner-hidden','scanner-visible'):pager.className.replace('scanner-visible','scanner-hidden');
   if(mode==='heatmap')renderHeatmap();
   if(mode==='cards')renderCardGrid();
+  if(mode==='charts')renderBulkCharts();
 }
 
 function fgHeatColor(fg){
@@ -1243,6 +1250,95 @@ function fmtTime(ts,tf){
   const d=new Date(ts);
   if(tf==='W'||tf==='D')return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+
+// ─── Bulk Chart View ────────────────────────────────────────────────────────
+
+async function renderBulkCharts(){
+  const container=document.getElementById('chartsContainer');
+  container.innerHTML='<div style="text-align:center;padding:20px;color:#5e6673">Loading charts...</div>';
+  const syms=(D.symbols||[]).slice(0,100);
+  if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
+
+  const YMIN=-60,YMAX=60;
+
+  // Sort controls + grid
+  let html='<div style="display:flex;gap:4px;padding:4px 8px;align-items:center;flex-wrap:wrap">';
+  html+='<span style="color:#5e6673;font-size:11px">Sort:</span>';
+  html+='<button class="btn" onclick="bulkChartSort(\'f\',1)" style="font-size:10px;padding:2px 6px">F&G ↑ (fear first)</button>';
+  html+='<button class="btn" onclick="bulkChartSort(\'f\',-1)" style="font-size:10px;padding:2px 6px">F&G ↓</button>';
+  html+='<button class="btn" onclick="bulkChartSort(\'m\',-1)" style="font-size:10px;padding:2px 6px">MCap ↓</button>';
+  html+='<span style="color:#5e6673;font-size:10px;margin-left:8px">'+syms.length+' symbols | Shared Y: '+YMIN+' to +'+YMAX+'</span></div>';
+  html+='<div id="bulkGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px;padding:4px"></div>';
+  container.innerHTML=html;
+
+  const grid=document.getElementById('bulkGrid');
+  for(let i=0;i<syms.length;i++){
+    const s=syms[i];const fg=s.f||0;
+    const borderCol=fg<-20?'#0ecb81':fg>20?'#f6465d':'#2b2f36';
+    const cell=document.createElement('div');
+    cell.style.cssText='background:#12151a;border:1px solid '+borderCol+';border-left:3px solid '+borderCol+';border-radius:4px;padding:3px;cursor:pointer';
+    cell.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1px">'+
+      '<span style="font-weight:700;color:#eaecef;font-size:11px">'+s.s+'</span>'+
+      '<div style="display:flex;gap:4px;align-items:center">'+
+        (s.ch!=null?'<span style="font-size:9px;color:'+(s.ch>=0?'#0ecb81':'#f6465d')+'">'+(s.ch>=0?'+':'')+s.ch?.toFixed(1)+'%</span>':'')+
+        '<span style="font-size:12px;font-weight:700;color:'+(fg<-10?'#0ecb81':fg>10?'#f6465d':'#848e9c')+'">'+(fg>0?'+':'')+fg.toFixed(1)+'</span>'+
+      '</div></div>'+
+      '<canvas id="bc'+i+'" width="260" height="65"></canvas>';
+    cell.onclick=()=>openDM(s.s,s.c);
+    grid.appendChild(cell);
+  }
+
+  // Render charts in batches
+  for(let i=0;i<syms.length;i+=10){
+    const batch=syms.slice(i,i+10);
+    await Promise.all(batch.map(async(s,bi)=>{
+      const idx=i+bi;
+      try{
+        const r=await fetch('/api/history/'+encodeURIComponent(s.s)+'?tf=D');
+        const d=await r.json();
+        const fgArr=(d.fg||[]).slice(-90).map(x=>x.v);
+        if(fgArr.length<5)return;
+        const cv=document.getElementById('bc'+idx);if(!cv)return;
+        const ctx=cv.getContext('2d');const w=cv.width,h=cv.height;
+
+        // Zone backgrounds
+        const zones=[[YMAX,15,'rgba(246,70,93,0.06)'],[15,0,'rgba(200,180,100,0.03)'],[0,-15,'rgba(100,160,120,0.03)'],[-15,YMIN,'rgba(14,203,129,0.06)']];
+        for(const[f,t,c]of zones){
+          const y1=h-((f-YMIN)/(YMAX-YMIN))*h,y2=h-((t-YMIN)/(YMAX-YMIN))*h;
+          ctx.fillStyle=c;ctx.fillRect(0,Math.min(y1,y2),w,Math.abs(y2-y1));
+        }
+        // Zero line
+        const zy=h-((0-YMIN)/(YMAX-YMIN))*h;
+        ctx.beginPath();ctx.moveTo(0,zy);ctx.lineTo(w,zy);ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=0.5;ctx.stroke();
+        // -25 threshold
+        const ty=h-((-25-YMIN)/(YMAX-YMIN))*h;
+        ctx.beginPath();ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.strokeStyle='rgba(14,203,129,0.2)';ctx.setLineDash([2,2]);ctx.lineWidth=0.5;ctx.stroke();ctx.setLineDash([]);
+
+        // F&G line
+        ctx.beginPath();
+        for(let j=0;j<fgArr.length;j++){
+          const x=j/(fgArr.length-1)*w;
+          const y=h-((fgArr[j]-YMIN)/(YMAX-YMIN))*h;
+          j===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        }
+        const cur=fgArr[fgArr.length-1];
+        ctx.strokeStyle=cur<-15?'#0ecb81':cur>15?'#f6465d':'#f0b90b';ctx.lineWidth=1.8;ctx.stroke();
+        // End dot
+        const lx=w-2,ly=h-((cur-YMIN)/(YMAX-YMIN))*h;
+        ctx.beginPath();ctx.arc(lx,ly,2.5,0,Math.PI*2);ctx.fillStyle=ctx.strokeStyle;ctx.fill();
+      }catch{}
+    }));
+    await new Promise(r=>setTimeout(r,150));
+  }
+}
+
+function bulkChartSort(field,dir){
+  D.symbols=[...D.symbols].sort((a,b)=>{
+    const va=a[field]??0,vb=b[field]??0;
+    return dir*(va-vb);
+  });
+  renderBulkCharts();
 }
 
 // ─── Expandable Row Detail ──────────────────────────────────────────────────
