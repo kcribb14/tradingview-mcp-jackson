@@ -504,15 +504,17 @@ function cacheScore(sym, tf, series, bars) {
     barCount: bars.length,
   };
   // Append to F&G history (for band computation) — seed from full series if available
+  // NEVER overwrite deep history (from seed-history) with shallow series from background worker
   const entry = cache[key];
   if (!entry.fgHistory || entry.fgHistory.length < series.length) {
-    // Seed full history from the time series
+    // Seed full history from the time series — keep ALL points
     entry.fgHistory = series.map(s => Math.round(s.fg_score * 10) / 10);
   } else {
-    // Append latest value
+    // Just append latest value to existing (possibly deep) history
     entry.fgHistory.push(Math.round(last.fg_score * 10) / 10);
   }
-  if (entry.fgHistory.length > 500) entry.fgHistory = entry.fgHistory.slice(-500);
+  // Cap at 5000 points (~14 years) to prevent unbounded growth
+  if (entry.fgHistory.length > 5000) entry.fgHistory = entry.fgHistory.slice(-5000);
   _cacheDirty = true;
 }
 
@@ -848,14 +850,24 @@ app.get('/api/band/:category', (req, res) => {
 app.get('/api/seed-history/:symbol', async (req, res) => {
   try {
     const sym = req.params.symbol;
+    const force = req.query.force === '1';
+    const cache = getMemCache();
+    const key = sym + ':D';
+    const existing = cache[key]?.fgHistory?.length || 0;
+    // Skip if already deep (500+ points) unless forced
+    if (existing > 500 && !force) {
+      return res.json({ symbol: sym, historyLength: existing, bars: cache[key]?.barCount || 0, skipped: true });
+    }
     const { computeTimeSeries } = await import('../core/fg_backtest.js');
     const bars = await fetchBars(sym, 'D');
     if (!bars || bars.length < 150) return res.json({ error: 'Not enough bars', bars: bars?.length || 0 });
     const series = computeTimeSeries(bars);
     if (series.length < 10) return res.json({ error: 'Series too short', series: series.length });
-    const cache = getMemCache();
-    const key = sym + ':D';
-    if (!cache[key]) cache[key] = { fgScore: series[series.length - 1].fg_score, lastClose: bars[bars.length - 1].close };
+    if (!cache[key]) cache[key] = {};
+    cache[key].fgScore = Math.max(-80, Math.min(100, Math.round(series[series.length - 1].fg_score * 100) / 100));
+    cache[key].lastClose = bars[bars.length - 1].close;
+    cache[key].barCount = bars.length;
+    // Store FULL history — no truncation
     cache[key].fgHistory = series.map(s => Math.round(s.fg_score * 10) / 10);
     cache[key].fgDates = series.map(s => Math.floor(new Date(s.date).getTime() / 1000));
     _cacheDirty = true;
