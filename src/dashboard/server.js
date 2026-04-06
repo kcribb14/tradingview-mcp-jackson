@@ -1101,7 +1101,7 @@ async function bgWorkerLoop() {
         console.log(`Background: warmed ${workerStatus.warmed}/${queue.length} (${workerStatus.errors} errors)`);
         rebuildData(); // Refresh dashboard data periodically
       }
-      await new Promise(r => setTimeout(r, 1200)); // Rate limit: ~50/min
+      await new Promise(r => setTimeout(r, 400)); // Rate limit: ~150/min (3x faster)
     }
 
     console.log(`Background cycle done: ${workerStatus.warmed} warmed, ${workerStatus.errors} errors`);
