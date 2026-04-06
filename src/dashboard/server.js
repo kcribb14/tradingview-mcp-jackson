@@ -534,10 +534,12 @@ app.get('/api/fetch-and-cache/:symbol', async (req, res) => {
     const key = `${sym}:${tf}`;
     const TTL = { '15': 30 * 60e3, '60': 2 * 3600e3, '240': 8 * 3600e3, 'D': 24 * 3600e3, 'W': 7 * 24 * 3600e3 };
     const entry = cache[key];
-    if (entry?.fgScore != null && entry.lastScanTime) {
+    // Only return cached if COMPLETE (has fgScore AND lastClose AND non-zero priceChg)
+    const hasRealChg = entry?.priceChg !== undefined && entry.priceChg !== 0;
+    if (entry?.fgScore != null && entry.lastClose > 0 && hasRealChg && entry.lastScanTime) {
       const age = Date.now() - new Date(entry.lastScanTime).getTime();
       if (age < (TTL[tf] || 24 * 3600e3)) {
-        return res.json({ symbol: sym, tf, fg: entry.fgScore, zone: entry.zone, price: entry.lastClose, cached: true });
+        return res.json({ symbol: sym, tf, fg: entry.fgScore, zone: entry.zone, price: entry.lastClose, priceChg: entry.priceChg, cached: true });
       }
     }
 
@@ -1139,8 +1141,8 @@ async function bgWorkerLoop() {
       if (seen.has(key)) return false;
       seen.add(key);
       const entry = cache[key];
-      // Re-fetch if: missing entirely, OR has fgScore but no price (incomplete)
-      if (entry?.fgScore != null && (!entry.lastClose || entry.lastClose === 0)) return true; // Incomplete — needs re-fetch
+      // Re-fetch if: missing entirely, OR has fgScore but no price/change (incomplete)
+      if (entry?.fgScore != null && (!entry.lastClose || entry.lastClose === 0 || entry.priceChg === 0 || entry.priceChg === undefined)) return true;
       if (entry?.lastScanTime) {
         const age = now - new Date(entry.lastScanTime).getTime();
         if (age < (TF_TTL[item.tf] || 86400e3)) return false; // Still fresh AND complete
