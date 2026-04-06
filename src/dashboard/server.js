@@ -109,7 +109,8 @@ function rebuildData() {
       // Clamp all F&G scores to safe range
       const clamp = v => v != null ? Math.max(-80, Math.min(100, Math.round(v * 10) / 10)) : null;
       // 24h change approximation from pmacd component (price vs EMA deviation)
-      const ch = entry.components?.pmacd != null ? Math.round(entry.components.pmacd * 100) / 100 : null;
+      // Use real price change if available, fall back to pmacd proxy
+      const ch = entry.priceChg != null ? entry.priceChg : (entry.components?.pmacd != null ? Math.round(entry.components.pmacd * 100) / 100 : null);
       // Whale proxy: volume spike detection from moneyFlow component
       // High |moneyFlow| during fear = unusual volume = whale activity
       const mf = entry.components?.moneyFlow ?? 0;
@@ -470,13 +471,20 @@ async function fetchBars(sym, tf) {
 function cacheScore(sym, tf, series, bars) {
   if (!series || series.length === 0) return;
   const last = series[series.length - 1];
+  const lastBar = bars[bars.length - 1];
+  const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
+  const price = lastBar?.close || last.close || 0;
+  const chg = prevBar?.close > 0 ? Math.round(((lastBar.close / prevBar.close) - 1) * 10000) / 100 : 0;
   const cache = loadCache();
   const key = `${sym}:${tf}`;
   cache[key] = {
+    ...(cache[key] || {}), // preserve existing fields
     lastScanTime: new Date().toISOString(),
     fgScore: Math.max(-80, Math.min(100, Math.round(last.fg_score * 100) / 100)),
     zone: last.zone,
-    lastClose: last.close,
+    lastClose: price,
+    priceChg: chg,
+    volume: lastBar?.volume || 0,
     barCount: bars.length,
   };
   _saveCache(cache);
@@ -781,8 +789,8 @@ app.post('/api/warm-category', async (req, res) => {
   // Warm in background
   const { computeTimeSeries } = await import('../core/fg_backtest.js');
   (async () => {
-    for (let i = 0; i < uncached.length; i += 8) {
-      const batch = uncached.slice(i, i + 8);
+    for (let i = 0; i < uncached.length; i += 15) {
+      const batch = uncached.slice(i, i + 15);
       await Promise.all(batch.map(async (sym) => {
         try {
           const bars = await fetchBars(sym, 'D');
@@ -793,7 +801,7 @@ app.post('/api/warm-category', async (req, res) => {
         } catch {}
       }));
       if (i % 100 === 0 && i > 0) { _saveCache(loadCache()); rebuildData(); }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 300));
     }
     _saveCache(loadCache());
     rebuildData();
