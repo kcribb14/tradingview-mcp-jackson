@@ -213,11 +213,13 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   <button class="btn active" id="vTable" onclick="setScannerView('table')" style="font-size:11px;padding:3px 10px">Table</button>
   <button class="btn" id="vHeatmap" onclick="setScannerView('heatmap')" style="font-size:11px;padding:3px 10px">Heatmap</button>
   <button class="btn" id="vCards" onclick="setScannerView('cards')" style="font-size:11px;padding:3px 10px">Cards</button>
+  <button class="btn" id="vWall" onclick="setScannerView('wall')" style="font-size:11px;padding:3px 10px">Charts</button>
   <button class="btn" id="vCharts" onclick="setScannerView('charts')" style="font-size:11px;padding:3px 10px">Overlay</button>
 </div>
 <div id="tableContainer" style="overflow-x:auto"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
 <div id="heatmapContainer" style="display:none;padding:4px;min-height:300px"></div>
 <div id="cardsContainer" style="display:none;padding:4px"></div>
+<div id="wallContainer" style="display:none;overflow-y:auto;max-height:calc(100vh - 280px)"></div>
 <div id="chartsContainer" style="display:none;overflow-y:auto;max-height:calc(100vh - 280px)"></div>
 </div>
 <!-- Watchlist Grid view -->
@@ -878,16 +880,18 @@ function setScannerView(mode){
   ['tableContainer','heatmapContainer','cardsContainer','chartsContainer'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.style.display=id.startsWith(mode.replace('s',''))||id===mode+'Container'?'':'none';
   });
-  document.getElementById('tableContainer').style.display=mode==='table'?'':'none';
-  document.getElementById('heatmapContainer').style.display=mode==='heatmap'?'':'none';
-  document.getElementById('cardsContainer').style.display=mode==='cards'?'':'none';
-  document.getElementById('chartsContainer').style.display=mode==='charts'?'':'none';
-  ['vTable','vHeatmap','vCards','vCharts'].forEach(id=>{
+  ['tableContainer','heatmapContainer','cardsContainer','wallContainer','chartsContainer'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display='none';
+  });
+  const activeMap={table:'tableContainer',heatmap:'heatmapContainer',cards:'cardsContainer',wall:'wallContainer',charts:'chartsContainer'};
+  if(activeMap[mode]){const el=document.getElementById(activeMap[mode]);if(el)el.style.display=''}
+  ['vTable','vHeatmap','vCards','vWall','vCharts'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.classList.toggle('active',id==='v'+mode.charAt(0).toUpperCase()+mode.slice(1));
   });
   const pager=document.getElementById('pager');if(pager)pager.className=mode==='table'?pager.className.replace('scanner-hidden','scanner-visible'):pager.className.replace('scanner-visible','scanner-hidden');
   if(mode==='heatmap')renderHeatmap();
   if(mode==='cards')renderCardGrid();
+  if(mode==='wall')renderChartWall();
   if(mode==='charts')renderBulkCharts();
 }
 
@@ -1253,6 +1257,107 @@ function fmtTime(ts,tf){
 }
 
 // ─── Bulk Chart View ────────────────────────────────────────────────────────
+
+// ─── Chart Wall: dual-axis price+F&G mini charts ────────────────────────────
+let _wallRange='6M',_wallSize='md';
+const WALL_SZ={sm:{w:210,h:80,cols:'repeat(auto-fill,minmax(210px,1fr))'},md:{w:290,h:110,cols:'repeat(auto-fill,minmax(290px,1fr))'},lg:{w:430,h:160,cols:'repeat(auto-fill,minmax(430px,1fr))'}};
+
+function renderChartWall(){
+  const container=document.getElementById('wallContainer');
+  const syms=(D.symbols||[]).slice(0,200);
+  if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
+  const sz=WALL_SZ[_wallSize];
+  container.innerHTML='<div style="display:flex;justify-content:space-between;padding:4px 8px;align-items:center;flex-wrap:wrap">'+
+    '<span style="color:#5e6673;font-size:11px">'+syms.length+' symbols — price (white) + F&G (colored)</span>'+
+    '<div style="display:flex;gap:3px">'+
+    ['1M','3M','6M','1Y','ALL'].map(r=>'<button class="btn'+(r===_wallRange?' active':'')+'" onclick="setWallRange(\''+r+'\')" style="font-size:10px;padding:2px 6px">'+r+'</button>').join('')+
+    '<span style="color:#2b2f36;margin:0 2px">|</span>'+
+    ['sm','md','lg'].map(s=>'<button class="btn'+(s===_wallSize?' active':'')+'" onclick="setWallSize(\''+s+'\')" style="font-size:10px;padding:2px 6px">'+{sm:'S',md:'M',lg:'L'}[s]+'</button>').join('')+
+    '</div></div>'+
+    '<div id="wallGrid" style="display:grid;grid-template-columns:'+sz.cols+';gap:2px;padding:4px"></div>';
+
+  const grid=document.getElementById('wallGrid');
+  for(let i=0;i<syms.length;i++){
+    const s=syms[i];const fg=s.f||0;
+    const borderCol=fg<-20?'#0ecb81':fg>20?'#f6465d':'#2b2f36';
+    const pr=s.p>0?(s.p<0.01?s.p.toExponential(1):s.p<1?s.p.toFixed(4):s.p.toFixed(2)):'—';
+    const card=document.createElement('div');
+    card.style.cssText='background:#0d0d0d;border:1px solid '+borderCol+';border-left:3px solid '+borderCol+';border-radius:4px;padding:3px;cursor:pointer';
+    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
+      '<span style="font-weight:700;color:#eaecef;font-size:11px">'+s.s+'</span>'+
+      '<div style="display:flex;gap:4px;align-items:center">'+
+        (s.ch!=null&&s.ch!==0?'<span style="font-size:9px;color:'+(s.ch>=0?'#0ecb81':'#f6465d')+'">'+(s.ch>=0?'+':'')+s.ch.toFixed(1)+'%</span>':'')+
+        '<span style="font-size:9px;color:#5e6673">$'+pr+'</span>'+
+        '<span style="font-size:11px;font-weight:700;color:'+(fg<-15?'#0ecb81':fg>15?'#f6465d':'#848e9c')+';background:'+(fg<-15?'rgba(14,203,129,0.15)':fg>15?'rgba(246,70,93,0.15)':'rgba(100,100,100,0.1)')+';padding:1px 4px;border-radius:3px">'+(fg>0?'+':'')+fg.toFixed(1)+'</span>'+
+      '</div></div>'+
+      '<canvas id="wc'+i+'" width="'+(sz.w-10)+'" height="'+(sz.h-28)+'"></canvas>';
+    card.onclick=()=>openDM(s.s,s.c);
+    grid.appendChild(card);
+  }
+  // Lazy load with IntersectionObserver
+  const days={'1M':30,'3M':90,'6M':180,'1Y':365,'ALL':9999}[_wallRange]||180;
+  const observer=new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      if(en.isIntersecting&&!en.target.dataset.loaded){
+        en.target.dataset.loaded='1';
+        const idx=+en.target.dataset.idx;
+        renderWallChart(syms[idx],idx,days,sz);
+      }
+    });
+  },{rootMargin:'300px'});
+  grid.querySelectorAll('[id^=wc]').forEach(cv=>{cv.dataset.idx=cv.id.replace('wc','');observer.observe(cv.parentElement)});
+}
+
+async function renderWallChart(sym,idx,days,sz){
+  const cv=document.getElementById('wc'+idx);if(!cv)return;
+  try{
+    const r=await fetch('/api/history/'+encodeURIComponent(sym.s)+'?tf=D');
+    const d=await r.json();
+    const prices=(d.ohlcv||[]).slice(-days).map(b=>b.c);
+    const fgArr=(d.fg||[]).slice(-days).map(x=>x.v);
+    if(prices.length<5)return;
+
+    const ctx=cv.getContext('2d');const w=cv.width,h=cv.height;
+    const pMin=Math.min(...prices.filter(p=>p>0)),pMax=Math.max(...prices),pRng=pMax-pMin||1;
+    const FMIN=-60,FMAX=60;
+
+    // Zone backgrounds
+    ctx.fillStyle='rgba(246,70,93,0.05)';
+    const gy=h-((25-FMIN)/(FMAX-FMIN))*h;ctx.fillRect(0,0,w,gy);
+    ctx.fillStyle='rgba(14,203,129,0.05)';
+    const fy=h-((-25-FMIN)/(FMAX-FMIN))*h;ctx.fillRect(0,fy,w,h-fy);
+
+    // Zero line
+    const zy=h-((0-FMIN)/(FMAX-FMIN))*h;
+    ctx.beginPath();ctx.moveTo(0,zy);ctx.lineTo(w,zy);ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=0.5;ctx.stroke();
+
+    // Price line (white)
+    ctx.beginPath();
+    prices.forEach((p,j)=>{const x=j/(prices.length-1)*w,y=h-((p-pMin)/pRng)*h;j===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
+    ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=1.2;ctx.stroke();
+
+    // F&G line (colored segments)
+    if(fgArr.length>5){
+      const off=prices.length-Math.min(fgArr.length,prices.length);
+      for(let j=1;j<fgArr.length&&j+off<prices.length;j++){
+        const x1=(j-1+off)/(prices.length-1)*w,y1=h-((fgArr[j-1]-FMIN)/(FMAX-FMIN))*h;
+        const x2=(j+off)/(prices.length-1)*w,y2=h-((fgArr[j]-FMIN)/(FMAX-FMIN))*h;
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+        const v=fgArr[j];
+        ctx.strokeStyle=v<-25?'#ff5252':v<-10?'#ff9800':v<5?'#f0b90b':v<25?'#50b050':'#006400';
+        ctx.lineWidth=1.8;ctx.stroke();
+      }
+      // End dot
+      const last=fgArr[fgArr.length-1];
+      const lx=w-2,ly=h-((last-FMIN)/(FMAX-FMIN))*h;
+      ctx.beginPath();ctx.arc(lx,ly,2.5,0,Math.PI*2);
+      ctx.fillStyle=last<-15?'#0ecb81':last>15?'#f6465d':'#f0b90b';ctx.fill();
+    }
+  }catch{}
+}
+
+function setWallRange(r){_wallRange=r;renderChartWall()}
+function setWallSize(s){_wallSize=s;renderChartWall()}
 
 let _bulkChart=null,_bulkRange='3M',_bulkSyms=[];
 
