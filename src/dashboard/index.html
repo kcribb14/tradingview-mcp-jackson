@@ -2582,7 +2582,7 @@ function renderCmdSectorChart(data){
 }
 
 // ═══ Sector Accordion ═══
-const SECTOR_GROUPS={
+const ACCORD_SECTORS={
   'Crypto':{cats:['CRYPTO_MAJOR','CRYPTO_MID'],color:'#f7931a',icon:'\\u{20BF}'},
   'US Stocks':{cats:['US_LARGE_CAP','US_MID_SMALL'],color:'#627eea',icon:'\\u{1F1FA}\\u{1F1F8}'},
   'ASX Mining':{cats:['ASX_MINING_MID','ASX_MINING_MICRO'],color:'#ffd700',icon:'\\u{26CF}'},
@@ -2596,7 +2596,7 @@ const SECTOR_GROUPS={
 function buildSectorAccordion(allRows, sectorData){
   let h='<div style="margin-bottom:8px">';
   h+='<div style="color:#f0b90b;font-size:12px;font-weight:bold;margin:0 0 6px;padding:0 4px">OPPORTUNITIES BY SECTOR — deepest fear first</div>';
-  const sorted=Object.entries(SECTOR_GROUPS).sort((a,b)=>{
+  const sorted=Object.entries(ACCORD_SECTORS).sort((a,b)=>{
     const am=sectorData[a[0]]?.median||0,bm=sectorData[b[0]]?.median||0;return am-bm;
   });
   for(const [name,cfg] of sorted){
