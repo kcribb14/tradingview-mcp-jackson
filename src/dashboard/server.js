@@ -813,8 +813,8 @@ app.get('/api/band/:category', (req, res) => {
 
     // Outliers
     allSeries.sort((a, b) => a.current - b.current);
-    const bottom5 = allSeries.slice(0, 5).map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
-    const top5 = allSeries.slice(-5).reverse().map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
+    const bottom5 = allSeries.slice(0, 10).map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
+    const top5 = allSeries.slice(-10).reverse().map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
 
     const hasHistory = allSeries.filter(s => s.fg.length > 5).length;
     if (hasHistory < 5) {
@@ -826,10 +826,12 @@ app.get('/api/band/:category', (req, res) => {
 
     // Build percentile bands
     const maxLen = Math.min(days, Math.max(...allSeries.map(s => s.fg.length)));
-    const bands = { p10: [], p25: [], median: [], p75: [], p90: [], avg: [] };
+    const bands = { dates: [], p10: [], p25: [], median: [], p75: [], p90: [], avg: [] };
     for (let d = 0; d < maxLen; d++) {
+      // Estimate date: today minus (maxLen - d) trading days
+      bands.dates.push(Math.floor((Date.now() - (maxLen - d) * 86400000) / 1000));
       const vals = allSeries.map(s => { const idx = s.fg.length - maxLen + d; return idx >= 0 ? s.fg[idx] : null; }).filter(v => v != null).sort((a, b) => a - b);
-      if (vals.length < 3) { Object.values(bands).forEach(a => a.push(null)); continue; }
+      if (vals.length < 3) { ['p10','p25','median','p75','p90','avg'].forEach(k => bands[k].push(null)); continue; }
       const pctl = p => vals[Math.min(vals.length - 1, Math.floor(vals.length * p / 100))];
       bands.p10.push(Math.round(pctl(10) * 10) / 10); bands.p25.push(Math.round(pctl(25) * 10) / 10);
       bands.median.push(Math.round(pctl(50) * 10) / 10); bands.p75.push(Math.round(pctl(75) * 10) / 10);
@@ -840,6 +842,25 @@ app.get('/api/band/:category', (req, res) => {
     const lastSpread = (bands.p90[bands.p90.length - 1] || 0) - (bands.p10[bands.p10.length - 1] || 0);
     res.json({ symbols: allSeries.length, hasHistory: true, days: maxLen, bands, bottom5, top5, current: { median: lastMed, spread: Math.round(lastSpread * 10) / 10, pctFear: Math.round(allSeries.filter(s => s.current < -15).length / allSeries.length * 100) } });
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
+});
+
+// Seed F&G history from full OHLCV bars
+app.get('/api/seed-history/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const { computeTimeSeries } = await import('../core/fg_backtest.js');
+    const bars = await fetchBars(sym, 'D');
+    if (!bars || bars.length < 150) return res.json({ error: 'Not enough bars', bars: bars?.length || 0 });
+    const series = computeTimeSeries(bars);
+    if (series.length < 10) return res.json({ error: 'Series too short', series: series.length });
+    const cache = getMemCache();
+    const key = sym + ':D';
+    if (!cache[key]) cache[key] = { fgScore: series[series.length - 1].fg_score, lastClose: bars[bars.length - 1].close };
+    cache[key].fgHistory = series.map(s => Math.round(s.fg_score * 10) / 10);
+    cache[key].fgDates = series.map(s => Math.floor(new Date(s.date).getTime() / 1000));
+    _cacheDirty = true;
+    res.json({ symbol: sym, historyLength: series.length, bars: bars.length });
+  } catch (e) { res.json({ error: e.message?.slice(0, 80) }); }
 });
 
 // Category status — how many cached vs universe total

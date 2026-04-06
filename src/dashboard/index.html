@@ -1259,7 +1259,7 @@ let _bulkChart=null,_bulkRange='3M',_bulkSyms=[];
 function renderServerBand(data){
   const cv=document.getElementById('bulkOvCv');if(!cv)return;
   const b=data.bands;
-  const labels=b.median.map((_,i)=>{const d=new Date(Date.now()-(b.median.length-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+  const labels=b.dates?b.dates.map(ts=>{const d=new Date(ts*1000);return d.toLocaleDateString('en-AU',{year:'2-digit',month:'short'})}):b.median.map((_,i)=>{const d=new Date(Date.now()-(b.median.length-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
   _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets:[
     {data:b.p90,fill:'+1',backgroundColor:'rgba(246,70,93,0.06)',borderWidth:0,pointRadius:0,label:'90th'},
     {data:b.p10,fill:false,borderWidth:0,pointRadius:0,label:'10th'},
@@ -1272,13 +1272,15 @@ function renderServerBand(data){
       zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}}},
     scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:12,font:{size:9}}},
       y:{min:-60,max:60,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v}}}}});
-  // Legend
+  // Legend with 10 outliers as clickable badges
   const lg=document.getElementById('bulkLegend');if(lg){
-    const b5=data.bottom5||[],t5=data.top5||[],cur=data.current||{};
-    lg.innerHTML='<div style="display:flex;justify-content:space-between;width:100%">'+
-      '<div><span style="color:#0ecb81">▼ Fear:</span> '+b5.map(o=>'<span style="color:#0ecb81;cursor:pointer" onclick="openDM(\''+o.s+'\')">'+o.s+'('+o.fg+')</span>').join(' ')+'</div>'+
-      '<div><span style="color:#f6465d">▲ Greed:</span> '+t5.map(o=>'<span style="color:#f6465d;cursor:pointer" onclick="openDM(\''+o.s+'\')">'+ o.s+'('+(o.fg>0?'+':'')+o.fg+')</span>').join(' ')+'</div></div>'+
-      '<div style="color:#5e6673;margin-top:2px">'+data.symbols+' symbols | Median: '+cur.median+' | Spread: '+cur.spread+' pts | '+cur.pctFear+'% in fear</div>';
+    const bottom=data.bottom5||[],top=data.top5||[],cur=data.current||{};
+    const badge=(o,col,border)=>'<span style="color:'+col+';cursor:pointer;padding:1px 5px;border:1px solid '+border+';border-radius:3px;margin:1px;display:inline-block;font-size:10px" onclick="openDM(\''+o.s+'\')">'+o.s+' '+o.fg+'</span>';
+    lg.innerHTML='<div style="margin-bottom:3px"><span style="color:#0ecb81;font-size:11px;font-weight:600">▼ MOST FEARFUL: </span>'+
+      bottom.map(o=>badge(o,'#0ecb81','rgba(14,203,129,0.3)')).join('')+'</div>'+
+      '<div style="margin-bottom:3px"><span style="color:#f6465d;font-size:11px;font-weight:600">▲ MOST GREEDY: </span>'+
+      top.map(o=>badge(o,'#f6465d','rgba(246,70,93,0.3)')).join('')+'</div>'+
+      '<div style="color:#5e6673;font-size:11px">'+data.symbols+' symbols | '+data.days+' days | Median: '+cur.median+' | Spread: '+(cur.spread?.toFixed?.(0)||'?')+' pts | '+cur.pctFear+'% in fear</div>';
   }
 }
 
