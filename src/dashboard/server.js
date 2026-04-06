@@ -503,7 +503,17 @@ function cacheScore(sym, tf, series, bars) {
     volume: lastBar?.volume || 0,
     barCount: bars.length,
   };
-  _cacheDirty = true; // Will be saved by the periodic writer
+  // Append to F&G history (for band computation) — seed from full series if available
+  const entry = cache[key];
+  if (!entry.fgHistory || entry.fgHistory.length < series.length) {
+    // Seed full history from the time series
+    entry.fgHistory = series.map(s => Math.round(s.fg_score * 10) / 10);
+  } else {
+    // Append latest value
+    entry.fgHistory.push(Math.round(last.fg_score * 10) / 10);
+  }
+  if (entry.fgHistory.length > 500) entry.fgHistory = entry.fgHistory.slice(-500);
+  _cacheDirty = true;
 }
 
 // Track recently viewed symbols for background worker
@@ -772,6 +782,63 @@ app.get('/api/extremes/:symbol', async (req, res) => {
       currentFG: series[series.length - 1]?.fg_score,
       distanceToThreshold: Math.round((series[series.length - 1]?.fg_score - threshold) * 10) / 10,
     });
+  } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
+});
+
+// Server-side band computation — instant percentile bands for 1000+ symbols
+app.get('/api/band/:category', (req, res) => {
+  try {
+    const cats = req.params.category.split(',');
+    const days = Math.min(500, parseInt(req.query.days) || 90);
+    const cache = getMemCache();
+
+    // Collect all matching symbols' F&G history
+    const nameToKey = { 'Crypto Major': 'CRYPTO_MAJOR', 'Crypto Mid': 'CRYPTO_MID', 'US Large Cap': 'US_LARGE_CAP', 'US Mid/Small': 'US_MID_SMALL', 'ASX Top 50': 'ASX_TOP50', 'ASX Mining Mid': 'ASX_MINING_MID', 'ASX Mining Micro': 'ASX_MINING_MICRO', 'DEX Solana': 'DEX_SOLANA', 'DEX Other': 'DEX_OTHER', 'Commodities': 'COMMODITIES', 'ETFs': 'ETFS', 'Hong Kong': 'HONG_KONG', 'Japan': 'JAPAN', 'India': 'INDIA', 'Germany': 'GERMANY', 'South Africa': 'SOUTH_AFRICA', 'Canada TSX': 'CANADA_TSX', 'London LSE': 'LONDON_LSE' };
+    let syms = [];
+    for (const cat of cats) {
+      const key = nameToKey[cat] || cat;
+      if (key === 'ALL') { syms = Object.keys(MASTER_UNIVERSE).flatMap(k => MASTER_UNIVERSE[k]); break; }
+      if (MASTER_UNIVERSE[key]) syms.push(...MASTER_UNIVERSE[key]);
+    }
+    syms = [...new Set(syms)];
+
+    // Gather histories
+    const allSeries = [];
+    for (const sym of syms) {
+      const entry = cache[sym + ':D'];
+      if (!entry?.fgHistory?.length) { if (entry?.fgScore != null) allSeries.push({ sym, fg: [entry.fgScore], current: entry.fgScore }); continue; }
+      allSeries.push({ sym, fg: entry.fgHistory.slice(-days), current: entry.fgHistory[entry.fgHistory.length - 1] });
+    }
+    if (allSeries.length === 0) return res.json({ error: 'No data', symbols: 0 });
+
+    // Outliers
+    allSeries.sort((a, b) => a.current - b.current);
+    const bottom5 = allSeries.slice(0, 5).map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
+    const top5 = allSeries.slice(-5).reverse().map(s => ({ s: s.sym, fg: Math.round(s.current * 10) / 10 }));
+
+    const hasHistory = allSeries.filter(s => s.fg.length > 5).length;
+    if (hasHistory < 5) {
+      // Snapshot only
+      const values = allSeries.map(s => s.current).sort((a, b) => a - b);
+      const pctl = p => values[Math.min(values.length - 1, Math.floor(values.length * p / 100))];
+      return res.json({ symbols: allSeries.length, hasHistory: false, current: { p10: pctl(10), p25: pctl(25), median: pctl(50), p75: pctl(75), p90: pctl(90), avg: Math.round(values.reduce((s, v) => s + v, 0) / values.length * 10) / 10, pctFear: Math.round(values.filter(v => v < -15).length / values.length * 100) }, bottom5, top5 });
+    }
+
+    // Build percentile bands
+    const maxLen = Math.min(days, Math.max(...allSeries.map(s => s.fg.length)));
+    const bands = { p10: [], p25: [], median: [], p75: [], p90: [], avg: [] };
+    for (let d = 0; d < maxLen; d++) {
+      const vals = allSeries.map(s => { const idx = s.fg.length - maxLen + d; return idx >= 0 ? s.fg[idx] : null; }).filter(v => v != null).sort((a, b) => a - b);
+      if (vals.length < 3) { Object.values(bands).forEach(a => a.push(null)); continue; }
+      const pctl = p => vals[Math.min(vals.length - 1, Math.floor(vals.length * p / 100))];
+      bands.p10.push(Math.round(pctl(10) * 10) / 10); bands.p25.push(Math.round(pctl(25) * 10) / 10);
+      bands.median.push(Math.round(pctl(50) * 10) / 10); bands.p75.push(Math.round(pctl(75) * 10) / 10);
+      bands.p90.push(Math.round(pctl(90) * 10) / 10);
+      bands.avg.push(Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10);
+    }
+    const lastMed = bands.median[bands.median.length - 1] || 0;
+    const lastSpread = (bands.p90[bands.p90.length - 1] || 0) - (bands.p10[bands.p10.length - 1] || 0);
+    res.json({ symbols: allSeries.length, hasHistory: true, days: maxLen, bands, bottom5, top5, current: { median: lastMed, spread: Math.round(lastSpread * 10) / 10, pctFear: Math.round(allSeries.filter(s => s.current < -15).length / allSeries.length * 100) } });
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 

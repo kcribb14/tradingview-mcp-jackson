@@ -1256,11 +1256,46 @@ function fmtTime(ts,tf){
 
 let _bulkChart=null,_bulkRange='3M',_bulkSyms=[];
 
+function renderServerBand(data){
+  const cv=document.getElementById('bulkOvCv');if(!cv)return;
+  const b=data.bands;
+  const labels=b.median.map((_,i)=>{const d=new Date(Date.now()-(b.median.length-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+  _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets:[
+    {data:b.p90,fill:'+1',backgroundColor:'rgba(246,70,93,0.06)',borderWidth:0,pointRadius:0,label:'90th'},
+    {data:b.p10,fill:false,borderWidth:0,pointRadius:0,label:'10th'},
+    {data:b.p75,fill:'+1',backgroundColor:'rgba(240,185,11,0.08)',borderWidth:0,pointRadius:0,label:'75th'},
+    {data:b.p25,fill:false,borderWidth:0,pointRadius:0,label:'25th'},
+    {data:b.median,borderColor:'#f0b90b',borderWidth:2.5,pointRadius:0,label:'Median',tension:0.3},
+    {data:b.avg,borderColor:'#848e9c',borderWidth:1,borderDash:[4,2],pointRadius:0,label:'Average',tension:0.3},
+  ]},plugins:[dgtZoneBands],options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:true,labels:{color:'#848e9c',font:{size:10}}},datalabels:{display:false},
+      zoom:{zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'}}},
+    scales:{x:{grid:{display:false},ticks:{color:'#5e6673',maxTicksLimit:12,font:{size:9}}},
+      y:{min:-60,max:60,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#848e9c',callback:v=>(v>0?'+':'')+v}}}}});
+  // Legend
+  const lg=document.getElementById('bulkLegend');if(lg){
+    const b5=data.bottom5||[],t5=data.top5||[],cur=data.current||{};
+    lg.innerHTML='<div style="display:flex;justify-content:space-between;width:100%">'+
+      '<div><span style="color:#0ecb81">▼ Fear:</span> '+b5.map(o=>'<span style="color:#0ecb81;cursor:pointer" onclick="openDM(\''+o.s+'\')">'+o.s+'('+o.fg+')</span>').join(' ')+'</div>'+
+      '<div><span style="color:#f6465d">▲ Greed:</span> '+t5.map(o=>'<span style="color:#f6465d;cursor:pointer" onclick="openDM(\''+o.s+'\')">'+ o.s+'('+(o.fg>0?'+':'')+o.fg+')</span>').join(' ')+'</div></div>'+
+      '<div style="color:#5e6673;margin-top:2px">'+data.symbols+' symbols | Median: '+cur.median+' | Spread: '+cur.spread+' pts | '+cur.pctFear+'% in fear</div>';
+  }
+}
+
+function renderSnapshotBand(data){
+  const cv=document.getElementById('bulkOvCv');if(!cv)return;
+  const cur=data.current;
+  // Show current distribution as a simple display
+  const lg=document.getElementById('bulkLegend');if(lg){
+    lg.innerHTML='<div style="padding:20px;text-align:center;color:#848e9c">'+data.symbols+' symbols | Collecting daily history... | Median: '+cur.median+' | '+cur.pctFear+'% in fear<br>Band chart will populate over 7+ days of snapshots.</div>';
+  }
+}
+
 async function renderBulkCharts(){
   const container=document.getElementById('chartsContainer');
   const syms=D.symbols||[];_bulkSyms=syms;
   if(syms.length===0){container.innerHTML='<div style="color:#5e6673;text-align:center;padding:40px">No data</div>';return}
-  const mode=syms.length<=30?'lines':'band';
+  const mode=syms.length<=50?'lines':'band';
 
   container.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;flex-wrap:wrap">'+
     '<span style="color:#5e6673;font-size:11px">'+syms.length+' symbols — '+(mode==='lines'?'individual lines':'distribution band')+' — shared Y</span>'+
@@ -1277,8 +1312,21 @@ function setBulkRange(r){_bulkRange=r;renderBulkCharts()}
 
 async function fetchBulkOverlay(syms,mode){
   if(_bulkChart){_bulkChart.destroy();_bulkChart=null}
-  const toFetch=syms.slice(0,mode==='lines'?30:150);
-  const rangeDays={'1M':30,'3M':90,'6M':180,'1Y':365,'2Y':730,'ALL':99999}[_bulkRange]||90;
+  const rangeDays={'1M':30,'3M':90,'6M':180,'1Y':365,'2Y':730,'ALL':9999}[_bulkRange]||90;
+
+  // BAND MODE: use fast server-side computation
+  if(mode==='band'){
+    const cats=[...selectedCats].map(encodeURIComponent).join(',')||'ALL';
+    try{
+      const r=await fetch('/api/band/'+cats+'?days='+rangeDays);
+      const d=await r.json();
+      if(d.bands)return renderServerBand(d);
+      if(d.current)return renderSnapshotBand(d);
+    }catch(e){console.error('Band API error:',e)}
+    return;
+  }
+  // LINES MODE: fetch per symbol (up to 50)
+  const toFetch=syms.slice(0,50);
 
   // Fetch all in batches
   const histories={};
