@@ -1944,6 +1944,11 @@ async function loadCycle(){
     }
     html+='</div>';
 
+    // ─── SECTOR COMPARISON CHART ───
+    html+='<div class="sig-section"><div class="sig-title">SECTOR F&G COMPARISON — Historical</div>';
+    html+='<div style="position:relative;height:240px"><canvas id="cycleSectorChart"></canvas></div>';
+    html+='</div>';
+
     // ─── LEAD-LAG ───
     html+='<div class="sig-section"><div class="sig-title">LEAD-LAG ANALYSIS</div>';
     html+='<table class="sig-table"><tr><th>Leader</th><th>F&G</th><th>→</th><th>Follower</th><th>F&G</th><th>Gap</th><th>Signal</th></tr>';
@@ -2055,9 +2060,34 @@ async function loadCycle(){
       drawGauge('gauge1',mfgNorm,[mfgCol]);
       drawGauge('gauge2',asPct,[asCol]);
       drawGauge('gauge3',riskPct,[raCol]);
+      // Render sector comparison chart inside cycle view
+      renderCycleSectorChart();
     },50);
 
   }catch(e){el.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
+}
+
+let cycleSectorChartInst=null;
+async function renderCycleSectorChart(){
+  const cv=document.getElementById('cycleSectorChart');if(!cv)return;
+  try{
+    const r=await fetch('/api/sector-comparison');const d=await r.json();
+    if(!d.sectors)return;
+    if(cycleSectorChartInst){cycleSectorChartInst.destroy();cycleSectorChartInst=null}
+    const datasets=[];let maxLen=0;
+    for(const[name,s]of Object.entries(d.sectors)){
+      if(!s.historyMedian||s.historyMedian.length<5)continue;
+      maxLen=Math.max(maxLen,s.historyMedian.length);
+      datasets.push({label:name+' ('+s.symbols+')',data:s.historyMedian,borderColor:s.color||'#888',borderWidth:2,pointRadius:0,tension:0.3,spanGaps:true});
+    }
+    if(!datasets.length)return;
+    datasets.forEach(ds=>{const pad=maxLen-ds.data.length;if(pad>0)ds.data=[...Array(pad).fill(null),...ds.data]});
+    const labels=Array.from({length:maxLen},(_,i)=>{const dt=new Date(Date.now()-(maxLen-i)*86400000);return dt.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+    cycleSectorChartInst=new Chart(cv,{type:'line',data:{labels,datasets},plugins:[dgtZoneBands],
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'bottom',labels:{color:'#888',font:{size:9},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false}},
+        scales:{x:{display:false},y:{min:-50,max:50,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#666',font:{size:9},callback:v=>(v>0?'+':'')+v}}}}});
+  }catch(e){console.error('Cycle sector chart error:',e)}
 }
 
 // ─── View switching ─────────────────────────────────────────────────────────
