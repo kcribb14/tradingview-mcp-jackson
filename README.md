@@ -16,14 +16,17 @@ npm run dashboard        # Start on localhost:3000
 - **Trending**: Gainers, losers, whale activity, DEX hot tokens.
 
 ## Data Sources
-| Source | Coverage | History |
-|--------|----------|---------|
-| Yahoo Finance | Stocks, ETFs, commodities | max (10yr daily) |
-| Binance | Top crypto | 1000 bars (~2.7yr) |
-| CryptoCompare | Full crypto history | BTC since 2010 (15yr) |
-| CoinGecko | Crypto fundamentals | ATH, sentiment, dev activity |
-| DexScreener | DEX tokens (16 chains) | Real-time |
-| HuggingFace | 3.96M global drillholes | Geological |
+| Source | Coverage | Cost |
+|--------|----------|------|
+| Yahoo Finance | Stocks, ETFs, commodities OHLCV | Free |
+| Binance | Top crypto OHLCV | Free |
+| CryptoCompare | Full crypto history (BTC since 2010) | Free |
+| CoinGecko | Crypto fundamentals + market caps | Free |
+| DexScreener | DEX tokens (16 chains) | Free |
+| HuggingFace | 3.96M global drillholes | Free |
+| **SEC EDGAR** | **Filings, insider trades, XBRL financials** | **Free** |
+| Finnhub | Metrics, earnings, analyst, news | Free (60/min) |
+| Financial Datasets | US OHLCV + earnings backup | Free tier |
 
 ## Signal Scoring (0-100)
 F&G Depth + Smart Money + ATH Distance + Cycle Position + Momentum + Historical WR + Fundamental Gap + Geological
@@ -49,22 +52,26 @@ Push notifications: subscribe to `kieran-fg-signals` on ntfy app.
 - `~/.tradingview-mcp/tracking/` — Forward signal tracking
 - `~/.tradingview-mcp/logs/heartbeat.log` — Server health
 
-## Financial Datasets API (Optional but Recommended)
+## Fundamental Data Sources ($0/mo)
 
-For US stock fundamentals, insider trading, SEC filings, and to bypass Yahoo rate limits:
+All fundamental data uses free APIs. No paid subscriptions needed.
 
-1. Sign up at https://financialdatasets.ai (free tier available)
-2. Add to `~/.zshrc`:
-   ```bash
-   export FINANCIAL_DATASETS_API_KEY="your_key"
-   ```
-3. Restart the dashboard server
-4. Run backfill: `node scripts/fd_backfill.mjs`
+### SEC EDGAR (free, no key required)
+- 10-K/10-Q/8-K filings with direct links
+- Form 4 insider trades (smart money signal)
+- XBRL financials: revenue, net income, assets, equity, D/E ratio, EPS
+- Coverage: all US public companies
 
-This adds:
-- US stock OHLCV (no rate limits, fills the Yahoo gap)
-- Quarterly financials (income, balance sheet, cash flow)
-- Insider trades (smart money signal)
-- SEC filings (10-K, 10-Q, 8-K alerts)
-- Analyst earnings estimates
-- Crypto prices (alternative to Binance/CryptoCompare)
+### Finnhub (optional, free tier — 60 req/min, no card)
+- P/E, P/B, ROE, margins, revenue growth
+- Earnings surprises (beat/miss history)
+- Analyst recommendations + price targets
+- Company news
+- Get key: https://finnhub.io/register
+- Add to `~/.zshrc`: `export FINNHUB_API_KEY="your_key"`
+
+### Financial Datasets (optional fallback — free tier)
+- US stock OHLCV when Yahoo rate-limits
+- Earnings data backup
+- Get key: https://financialdatasets.ai
+- Add to `~/.zshrc`: `export FINANCIAL_DATASETS_API_KEY="your_key"`

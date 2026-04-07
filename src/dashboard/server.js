@@ -16,10 +16,12 @@ import { loadDexTokens } from '../core/dex_universe.js';
 import { scoreSignal } from '../core/signal_scorer.js';
 import { miningFundamental, cryptoFundamental, stockFundamental, commodityFundamental, calculateGap } from '../core/fundamental_catalysts.js';
 
-// Financial Datasets API — fundamentals, insider trades, SEC filings
-let fd = null;
+// Free data sources — SEC EDGAR (no key), Finnhub (free tier), Financial Datasets (free tier)
+let sec = null, finnhub = null, fd = null;
+try { sec = await import('../data/sec_edgar.js'); } catch { sec = null; }
+try { finnhub = await import('../data/finnhub.js'); if (!finnhub.isAvailable()) finnhub = null; } catch { finnhub = null; }
 try { fd = await import('../data/financial_datasets.js'); if (!fd.isAvailable()) fd = null; } catch { fd = null; }
-if (fd) console.log('Financial Datasets API loaded');
+console.log('Data sources: SEC EDGAR=' + (sec ? 'YES' : 'no') + ' Finnhub=' + (finnhub ? 'YES' : 'no') + ' FD=' + (fd ? 'YES' : 'no'));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1001,56 +1003,93 @@ app.get('/api/geology/:symbol', (req, res) => {
 });
 
 // Fundamentals via Financial Datasets — income, insider, filings, earnings
+// Fundamentals — SEC EDGAR (free, primary) + Finnhub (free tier, secondary) + FD (fallback)
 app.get('/api/fundamentals/:symbol', async (req, res) => {
-  if (!fd) return res.json({ error: 'Financial Datasets API not configured. Set FINANCIAL_DATASETS_API_KEY.' });
   const sym = req.params.symbol.toUpperCase();
+  if (sym.includes('.') || sym.includes('=') || sym.includes('-')) return res.json({ error: 'US stocks only' });
   try {
-    const [income, insider, filings, earnings] = await Promise.all([
-      fd.getIncomeStatements(sym, 'quarterly', 4).catch(() => []),
-      fd.getInsiderTrades(sym, 20).catch(() => []),
-      fd.getSecFilings(sym, 10).catch(() => []),
-      fd.getEarnings(sym).catch(() => null),
+    // SEC EDGAR — free, no key
+    const [secFilings, secInsider, secFund] = await Promise.all([
+      sec ? sec.getFilings(sym, ['10-K', '10-Q', '8-K']).catch(() => []) : [],
+      sec ? sec.getInsiderTrades(sym, 20).catch(() => []) : [],
+      sec ? sec.getFundamentals(sym).catch(() => null) : null
     ]);
 
+    // Finnhub — free tier (if key set)
+    let fhMetrics = {}, fhEarnings = [], fhRecommend = [];
+    if (finnhub) {
+      const results = await Promise.allSettled([
+        finnhub.getMetrics(sym),
+        finnhub.getEarningsSurprises(sym),
+        finnhub.getRecommendations(sym)
+      ]);
+      fhMetrics = results[0].status === 'fulfilled' ? results[0].value : {};
+      fhEarnings = results[1].status === 'fulfilled' ? results[1].value : [];
+      fhRecommend = results[2].status === 'fulfilled' ? results[2].value : [];
+    }
+
+    // FD fallback for earnings if Finnhub unavailable
+    let fdEarnings = null;
+    if (fd && !fhEarnings.length) {
+      try { fdEarnings = await fd.getEarnings(sym); } catch {}
+    }
+
+    // Score 0-100
     let score = 50;
     const factors = [];
+    const sources = { sec: !!secFund, finnhub: !!Object.keys(fhMetrics).length, fd: !!fdEarnings };
 
-    // Revenue growth
-    if (income.length >= 2 && income[0].revenue && income[1].revenue) {
-      const growth = ((income[0].revenue / income[1].revenue) - 1) * 100;
-      if (growth > 20) { score += 15; factors.push('Revenue +' + growth.toFixed(0) + '%'); }
-      else if (growth > 10) { score += 8; factors.push('Revenue +' + growth.toFixed(0) + '%'); }
-      else if (growth < -10) { score -= 10; factors.push('Revenue ' + growth.toFixed(0) + '%'); }
+    // Profitability (SEC EDGAR)
+    if (secFund?.profitable) { score += 10; factors.push('Profitable'); }
+    else if (secFund && !secFund.profitable) { score -= 10; factors.push('Loss-making'); }
+
+    // Debt (SEC EDGAR)
+    if (secFund?.debtToEquity != null && secFund.debtToEquity < 1) { score += 5; factors.push('Low debt (D/E ' + secFund.debtToEquity.toFixed(1) + ')'); }
+    else if (secFund?.debtToEquity > 3) { score -= 5; factors.push('High debt (D/E ' + secFund.debtToEquity.toFixed(1) + ')'); }
+
+    // Margins (Finnhub)
+    if (fhMetrics.grossMarginTTM > 40) { score += 5; factors.push('Gross margin ' + fhMetrics.grossMarginTTM.toFixed(0) + '%'); }
+    if (fhMetrics.netProfitMarginTTM > 15) { score += 5; factors.push('Net margin ' + fhMetrics.netProfitMarginTTM.toFixed(0) + '%'); }
+
+    // Valuation (Finnhub)
+    if (fhMetrics.peBasicExclExtraTTM > 0 && fhMetrics.peBasicExclExtraTTM < 15) { score += 8; factors.push('Cheap P/E ' + fhMetrics.peBasicExclExtraTTM.toFixed(1)); }
+    else if (fhMetrics.peBasicExclExtraTTM > 40) { score -= 5; factors.push('Expensive P/E ' + fhMetrics.peBasicExclExtraTTM.toFixed(1)); }
+
+    // ROE (Finnhub)
+    if (fhMetrics.roeRfy > 20) { score += 8; factors.push('Strong ROE ' + fhMetrics.roeRfy.toFixed(0) + '%'); }
+
+    // Insider activity (SEC EDGAR Form 4 count)
+    if (secInsider.length > 5) { factors.push(secInsider.length + ' recent insider filings'); }
+
+    // Earnings (Finnhub or FD)
+    if (fhEarnings.length > 0) {
+      const beats = fhEarnings.filter(e => e.actual > e.estimate).length;
+      if (beats / fhEarnings.length > 0.6) { score += 5; factors.push('Beat ' + beats + '/' + fhEarnings.length + ' earnings'); }
+    } else if (fdEarnings?.quarterly?.eps_surprise === 'BEAT') { score += 5; factors.push('EPS beat'); }
+    else if (fdEarnings?.quarterly?.eps_surprise === 'MISS') { score -= 5; factors.push('EPS miss'); }
+
+    // Analyst (Finnhub)
+    let analystVerdict = '';
+    if (fhRecommend.length > 0) {
+      const l = fhRecommend[0];
+      const bull = (l.strongBuy || 0) + (l.buy || 0), bear = (l.sell || 0) + (l.strongSell || 0);
+      if (bull > bear * 2) { score += 5; analystVerdict = 'Analyst BULLISH'; factors.push(analystVerdict); }
+      else if (bear > bull) { score -= 3; analystVerdict = 'Analyst BEARISH'; factors.push(analystVerdict); }
     }
-    // Profitability
-    if (income[0]?.net_income > 0) { score += 10; factors.push('Profitable'); }
-    else if (income[0]?.net_income < 0) { score -= 10; factors.push('Loss-making'); }
-    // Margins
-    if (income[0]?.revenue > 0 && income[0]?.gross_profit > 0) {
-      const gm = income[0].gross_profit / income[0].revenue;
-      if (gm > 0.5) { score += 5; factors.push('Gross margin ' + (gm * 100).toFixed(0) + '%'); }
-    }
-    // Insider activity
-    const buys = insider.filter(t => t.transaction_shares > 0).length;
-    const sells = insider.filter(t => t.transaction_shares < 0).length;
-    if (buys > sells * 2 && buys > 2) { score += 10; factors.push(buys + ' insider buys'); }
-    else if (sells > buys * 2 && sells > 3) { score -= 5; factors.push(sells + ' insider sells'); }
-    // Earnings beat
-    if (earnings?.quarterly?.eps_surprise === 'BEAT') { score += 5; factors.push('EPS beat'); }
-    else if (earnings?.quarterly?.eps_surprise === 'MISS') { score -= 5; factors.push('EPS miss'); }
 
     score = Math.max(0, Math.min(100, Math.round(score)));
 
     res.json({
-      symbol: sym, score, factors,
-      revenue: income[0]?.revenue || null,
-      netIncome: income[0]?.net_income || null,
-      eps: earnings?.quarterly?.earnings_per_share || null,
-      epsEstimate: earnings?.quarterly?.estimated_earnings_per_share || null,
-      epsSurprise: earnings?.quarterly?.eps_surprise || null,
-      insiderActivity: { trades: insider.length, netBuys: buys - sells },
-      recentFilings: filings.slice(0, 5).map(f => ({ type: f.filing_type, date: f.filing_date, url: f.filing_url || f.url })),
-      latestEarnings: earnings?.quarterly || null,
+      symbol: sym, score, factors, sources,
+      financials: secFund,
+      metrics: { pe: fhMetrics.peBasicExclExtraTTM, pb: fhMetrics.pbAnnual, roe: fhMetrics.roeRfy, grossMargin: fhMetrics.grossMarginTTM, netMargin: fhMetrics.netProfitMarginTTM },
+      filings: secFilings.slice(0, 8),
+      insiderActivity: { recentFilings: secInsider.length },
+      earningsHistory: fhEarnings.slice(0, 4),
+      eps: secFund?.eps || fdEarnings?.quarterly?.earnings_per_share || null,
+      epsSurprise: fdEarnings?.quarterly?.eps_surprise || null,
+      revenue: secFund?.revenue || null,
+      netIncome: secFund?.netIncome || null,
     });
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
@@ -1126,7 +1165,29 @@ app.get('/api/sector/:category', (req, res) => {
 
 // Earnings calendar — recent earnings for watchlist + top stocks
 app.get('/api/earnings-calendar', async (req, res) => {
-  if (!fd) return res.json({ earnings: [], error: 'FD not configured' });
+  // Try Finnhub first (has calendar), then FD fallback
+  if (finnhub) {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+      const cal = await finnhub.getEarningsSurprises('AAPL'); // test
+      // Finnhub earnings calendar is per-symbol, so fetch for top stocks
+      const watchlist = FAVS.slice(0, 10);
+      const top = (MASTER_UNIVERSE.US_LARGE_CAP || []).slice(0, 20);
+      const symbols = [...new Set([...watchlist, ...top])].filter(s => !s.includes('.'));
+      const results = [];
+      for (const sym of symbols.slice(0, 15)) {
+        try {
+          const e = await finnhub.getEarningsSurprises(sym);
+          if (Array.isArray(e) && e.length > 0) results.push({ symbol: sym, actual: e[0].actual, estimate: e[0].estimate, surprise: e[0].surprise, period: e[0].period });
+        } catch {}
+        await new Promise(r => setTimeout(r, 50));
+      }
+      return res.json({ earnings: results, source: 'finnhub' });
+    } catch {}
+  }
+  // FD fallback
+  if (!fd) return res.json({ earnings: [], error: 'No earnings source configured' });
   const watchlist = FAVS.slice(0, 10);
   const top = (MASTER_UNIVERSE.US_LARGE_CAP || []).slice(0, 20);
   const symbols = [...new Set([...watchlist, ...top])].filter(s => !s.includes('.') && !s.includes('='));
@@ -1138,7 +1199,7 @@ app.get('/api/earnings-calendar', async (req, res) => {
     } catch {}
     await new Promise(r => setTimeout(r, 100));
   }
-  res.json({ earnings: results });
+  res.json({ earnings: results, source: 'fd' });
 });
 
 // Trending: biggest movers + whale activity + new high-volume DEX tokens
