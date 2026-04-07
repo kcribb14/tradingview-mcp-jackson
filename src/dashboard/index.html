@@ -324,6 +324,77 @@ function makeYearLabels(len){
   });
 }
 
+// ─── Buy Links per asset class ──────────────────────────────────────────────
+const BUY_LINKS={
+  crypto:s=>[
+    {name:'Binance',url:'https://www.binance.com/en/trade/'+s+'_USDT',color:'#f0b90b'},
+    {name:'Coinbase',url:'https://www.coinbase.com/price/'+s.toLowerCase(),color:'#0052ff'},
+    {name:'Kraken',url:'https://www.kraken.com/prices/'+s.toLowerCase(),color:'#5848d6'},
+    {name:'CoinGecko',url:'https://www.coingecko.com/en/coins/'+s.toLowerCase(),color:'#8dc647'}
+  ],
+  dex:s=>[
+    {name:'DexScreener',url:'https://dexscreener.com/search?q='+s,color:'#00d4ff'},
+    {name:'Jupiter',url:'https://jup.ag/swap/USDC-'+s,color:'#c7f284'},
+    {name:'GeckoTerminal',url:'https://www.geckoterminal.com/search?query='+s,color:'#8dc647'}
+  ],
+  asx:s=>{const t=s.replace('.AX','');return[
+    {name:'CommSec',url:'https://www2.commsec.com.au/quotes/?stockCode='+t,color:'#ffcc00'},
+    {name:'Stake',url:'https://hellostake.com/au/asx/'+t,color:'#00d8ff'},
+    {name:'Selfwealth',url:'https://secure.selfwealth.com.au/Insights/StockResearch/'+t+'.AX',color:'#0066cc'},
+    {name:'Market Index',url:'https://www.marketindex.com.au/asx/'+t.toLowerCase(),color:'#888'}
+  ]},
+  us:s=>[
+    {name:'Robinhood',url:'https://robinhood.com/stocks/'+s,color:'#00c805'},
+    {name:'IBKR',url:'https://www.interactivebrokers.com/en/index.php?f=2222&exch=nasdaq&showcategories=STK&p='+s,color:'#d81e05'},
+    {name:'Stake',url:'https://hellostake.com/au/us/'+s,color:'#00d8ff'},
+    {name:'Yahoo',url:'https://finance.yahoo.com/quote/'+s,color:'#7e1fff'}
+  ],
+  intl:s=>[
+    {name:'Yahoo Finance',url:'https://finance.yahoo.com/quote/'+encodeURIComponent(s),color:'#7e1fff'},
+    {name:'IBKR',url:'https://www.interactivebrokers.com/en/index.php?f=2222&p='+s.split('.')[0],color:'#d81e05'},
+    {name:'TradingView',url:'https://www.tradingview.com/symbols/'+encodeURIComponent(s)+'/',color:'#2962ff'}
+  ],
+  commodities:s=>[
+    {name:'TradingView',url:'https://www.tradingview.com/symbols/'+encodeURIComponent(s)+'/',color:'#2962ff'},
+    {name:'IG',url:'https://www.ig.com/au/commodities/'+s.replace('=F','').toLowerCase(),color:'#dc0714'},
+    {name:'Yahoo',url:'https://finance.yahoo.com/quote/'+encodeURIComponent(s),color:'#7e1fff'}
+  ],
+  etf:s=>[
+    {name:'Stake',url:'https://hellostake.com/au/us/'+s,color:'#00d8ff'},
+    {name:'Robinhood',url:'https://robinhood.com/stocks/'+s,color:'#00c805'},
+    {name:'Yahoo',url:'https://finance.yahoo.com/quote/'+s,color:'#7e1fff'}
+  ]
+};
+function getBuyLinks(sym,cat){
+  const c=(cat||'').toLowerCase();
+  if(c.includes('crypto'))return BUY_LINKS.crypto(sym);
+  if(c.includes('dex'))return BUY_LINKS.dex(sym);
+  if(c.includes('asx'))return BUY_LINKS.asx(sym);
+  if(c.includes('us large')||c.includes('us mid'))return BUY_LINKS.us(sym);
+  if(c.includes('etf'))return BUY_LINKS.etf(sym);
+  if(c.includes('commod'))return BUY_LINKS.commodities(sym);
+  if(c.includes('canada')||c.includes('london')||c.includes('hong')||c.includes('japan')||c.includes('india')||c.includes('germany')||c.includes('africa'))return BUY_LINKS.intl(sym);
+  return[{name:'Yahoo',url:'https://finance.yahoo.com/quote/'+encodeURIComponent(sym),color:'#7e1fff'},{name:'TradingView',url:'https://www.tradingview.com/symbols/'+encodeURIComponent(sym)+'/',color:'#2962ff'}];
+}
+function buyBtnHtml(sym,cat){
+  return'<button onclick="event.stopPropagation();toggleBuyDD(event,\''+sym+'\',\''+cat+'\')" style="background:#222;color:#0ecb81;border:1px solid #0ecb8144;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:10px">Buy \\u25BE</button>';
+}
+function toggleBuyDD(event,sym,cat){
+  event.stopPropagation();
+  document.querySelectorAll('.buy-dd-menu').forEach(d=>d.remove());
+  const links=getBuyLinks(sym,cat);
+  const menu=document.createElement('div');
+  menu.className='buy-dd-menu';
+  menu.style.cssText='position:fixed;background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:4px;z-index:9999;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,0.5)';
+  const rect=event.target.getBoundingClientRect();
+  menu.style.top=(rect.bottom+4)+'px';
+  menu.style.left=Math.min(rect.left,window.innerWidth-180)+'px';
+  menu.innerHTML='<div style="color:#666;font-size:10px;padding:4px 8px;border-bottom:1px solid #333;margin-bottom:2px">'+sym+' — Buy on:</div>'+
+    links.map(l=>'<a href="'+l.url+'" target="_blank" rel="noopener noreferrer" style="display:block;padding:6px 10px;color:'+l.color+';text-decoration:none;font-size:12px;border-radius:3px" onmouseover="this.style.background=\'#2a2a2a\'" onmouseout="this.style.background=\'transparent\'">'+l.name+' \\u2197</a>').join('');
+  document.body.appendChild(menu);
+  setTimeout(()=>{document.addEventListener('click',function cl(e){if(!menu.contains(e.target)){menu.remove();document.removeEventListener('click',cl)}})},10);
+}
+
 let D={symbols:[],stats:{},categories:[],tfCounts:{}},chart=null,cTF='Daily',cCat=null,sCol='f',sDir=1,curPage=1,pageSize=100;
 let selectedCats=new Set(); // multi-select categories
 let FAVS=[],showWL=false,filters={fg_max:null,swing:null},dmSym=null,dmFGChart=null;
@@ -633,7 +704,8 @@ function renderTable(){
     {k:'z',l:'Zone',tt:'DGT zones: Despondency < Panic < Fear < Anxiety < Balanced < Optimism < Excitement < Thrill < Euphoria'},
     {k:'',l:'Trend',tt:'Cross-TF trend: 15m→1H→4H→Daily→Weekly. Green=improving, Red=worsening'},
     {k:'w',l:'Signal',tt:'ENTRY: F&G below 10th pctl for asset class. EXIT: above 75th pctl.'},
-    {k:'wh',l:'Whale',tt:'🐋 ACC = Volume >3x 20-day average during fear (smart money buying). 🔴 DIST = High volume during greed (distribution).'}
+    {k:'wh',l:'Whale',tt:'🐋 ACC = Volume >3x 20-day average during fear (smart money buying). 🔴 DIST = High volume during greed (distribution).'},
+    {k:'',l:'Buy'}
   ];
   const ar=k=>sCol===k?(sDir===1?' ▲':' ▼'):'';
   document.getElementById('thead').innerHTML=cols.map(c=>{
@@ -667,7 +739,8 @@ function renderTable(){
       '<td style="font-size:10px;color:#848e9c">'+zone(r.f)+'</td>'+
       '<td><canvas class="sparkline" width="60" height="20" data-spark="'+(r.spark||[]).join(',')+'"></canvas></td>'+
       '<td>'+sw+'</td>'+
-      '<td style="font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">🐋 ACC</span>':r.wh==='DIST'?'<span style="color:#f6465d">🔴 DIST</span>':'—')+'</td></tr>'+
+      '<td style="font-size:10px">'+(r.wh==='ACC'?'<span style="color:#0ecb81">🐋 ACC</span>':r.wh==='DIST'?'<span style="color:#f6465d">🔴 DIST</span>':'—')+'</td>'+
+      '<td onclick="event.stopPropagation()">'+buyBtnHtml(r.s,r.c||'')+'</td></tr>'+
       // Expandable detail row (hidden by default)
       '<tr class="expand-row" id="expand-'+r.s.replace(/[^a-zA-Z0-9]/g,'_')+'" style="display:none"><td colspan="16" style="padding:0;background:#12151a"></td></tr>';
   }).join('');
@@ -955,8 +1028,9 @@ function renderCardGrid(){
     const fg=s.f||0;
     const borderCol=fg<-20?'#0ecb81':fg>20?'#f6465d':'#2b2f36';
     const card=document.createElement('div');
-    card.style.cssText='background:#181a20;border:2px solid '+borderCol+';border-radius:6px;padding:8px;cursor:pointer;min-height:70px';
-    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
+    card.style.cssText='background:#181a20;border:2px solid '+borderCol+';border-radius:6px;padding:8px;cursor:pointer;min-height:70px;position:relative';
+    card.innerHTML='<div style="position:absolute;top:4px;right:4px;z-index:1" onclick="event.stopPropagation()">'+buyBtnHtml(s.s,s.c||'')+'</div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
       '<span style="font-weight:700;color:#eaecef;font-size:13px">'+s.s+'</span>'+
       '<span style="font-size:12px;font-weight:700;color:'+(fg<-10?'#0ecb81':fg>10?'#f6465d':'#848e9c')+';background:'+(fg<-10?'rgba(14,203,129,0.15)':fg>10?'rgba(246,70,93,0.15)':'rgba(100,100,100,0.1)')+';padding:2px 6px;border-radius:3px">'+(fg>0?'+':'')+fg.toFixed(1)+'</span></div>'+
       '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:11px;color:#5e6673">'+
@@ -1740,6 +1814,14 @@ async function openDM(sym,cat){
     verdictHtml+='<div class="vd-body">F&G is '+(fg!=null?(fg>0?'+':'')+fg:'loading')+'. Not in a buy or sell zone for '+(cat||'this class')+'.</div>';
     verdictHtml+='</div>';
   }
+  // Buy links row
+  const buyLinks=getBuyLinks(sym,cat);
+  verdictHtml+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">';
+  verdictHtml+='<span style="color:#666;font-size:11px">BUY ON:</span>';
+  buyLinks.forEach(l=>{
+    verdictHtml+='<a href="'+l.url+'" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:3px;padding:4px 10px;background:'+l.color+'22;border:1px solid '+l.color+'55;color:'+l.color+';text-decoration:none;border-radius:4px;font-size:11px;font-weight:600" onmouseover="this.style.background=\''+l.color+'44\'" onmouseout="this.style.background=\''+l.color+'22\'">'+l.name+' \u2197</a>';
+  });
+  verdictHtml+='</div>';
   vEl.innerHTML=verdictHtml;
 
   // ─── THREE INFO CARDS ───
@@ -2630,7 +2712,7 @@ function buildSectorAccordion(allRows, sectorData){
     h+='</div>';
     h+='<div id="accord-'+id+'" style="display:'+(autoOpen?'block':'none')+';padding:0 12px 8px">';
     h+='<table style="width:100%;border-collapse:collapse;font-size:12px;color:#ccc"><thead><tr style="border-bottom:1px solid #333;color:#888">';
-    h+='<th style="text-align:left;padding:3px">#</th><th style="text-align:left;padding:3px">Symbol</th><th style="padding:3px">Price</th><th style="padding:3px">Chg%</th><th style="padding:3px">F&G</th><th style="padding:3px">Score</th><th style="padding:3px">Signal</th>';
+    h+='<th style="text-align:left;padding:3px">#</th><th style="text-align:left;padding:3px">Symbol</th><th style="padding:3px">Price</th><th style="padding:3px">Chg%</th><th style="padding:3px">F&G</th><th style="padding:3px">Score</th><th style="padding:3px">Signal</th><th style="padding:3px"></th>';
     h+='</tr></thead><tbody>';
     top5.forEach((s,i)=>{
       const fg=s.f||0,chg=s.ch||0,p=s.p||0;
@@ -2643,6 +2725,7 @@ function buildSectorAccordion(allRows, sectorData){
       h+='<td style="padding:3px;font-weight:bold;color:'+(fg<-15?'#0ecb81':fg>15?'#f6465d':'#888')+'">'+(fg>0?'+':'')+fg.toFixed(1)+'</td>';
       h+='<td style="padding:3px">'+(s.sq||'—')+'</td>';
       h+='<td style="padding:3px;font-size:10px">'+(s.w||'')+'</td>';
+      h+='<td style="padding:3px" onclick="event.stopPropagation()">'+buyBtnHtml(s.s,s.c||'')+'</td>';
       h+='</tr>';
     });
     h+='</tbody></table>';
