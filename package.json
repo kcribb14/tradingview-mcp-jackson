@@ -24,7 +24,9 @@
     "dashboard": "node src/dashboard/server.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.8.0",
     "chrome-remote-interface": "^0.33.2",
     "compression": "^1.8.1"
   }

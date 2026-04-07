@@ -391,8 +391,36 @@ function loadDeepHistory(symbol) {
   } catch { return null; }
 }
 
+// SQLite read layer (if available)
+let _sqliteDB = null;
+function getSqliteDB() {
+  if (_sqliteDB) return _sqliteDB;
+  try {
+    const Db = (await import('better-sqlite3')).default;
+    _sqliteDB = new Db(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true });
+    return _sqliteDB;
+  } catch { return null; }
+}
+// Eagerly try to load it
+try { const Db = (await import('better-sqlite3')).default; _sqliteDB = new Db(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true }); console.log('SQLite DB loaded:', _sqliteDB.prepare('SELECT COUNT(*) as n FROM prices').get().n, 'price bars'); } catch {}
+
+function fetchBarsFromDB(sym) {
+  const db = _sqliteDB;
+  if (!db) return null;
+  try {
+    const rows = db.prepare('SELECT date, open, high, low, close, volume FROM prices WHERE ticker = ? ORDER BY date ASC').all(sym);
+    if (rows.length < 50) return null;
+    return rows.map(r => ({ time: Math.floor(new Date(r.date).getTime() / 1000), open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume || 0 }));
+  } catch { return null; }
+}
+
 async function fetchBars(sym, tf) {
-  // Use cached deep history if available (30+ years daily)
+  // SQLite DB first (fastest, 30+ years)
+  if (tf === 'D') {
+    const dbBars = fetchBarsFromDB(sym);
+    if (dbBars && dbBars.length > 500) return dbBars;
+  }
+  // Fall back to file-based deep history
   if (tf === 'D') {
     const deep = loadDeepHistory(sym);
     if (deep && deep.length > 500) return deep;
