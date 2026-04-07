@@ -9,3 +9,8 @@ node scripts/etl/dexscreener.cjs >> $LOG 2>&1
 node scripts/etl/geckoterminal.cjs >> $LOG 2>&1
 node scripts/etl/dex_score.cjs >> $LOG 2>&1
 echo "$(date): Daily ETL complete" >> $LOG
+
+# Mining ETLs (additive)
+node scripts/etl/asx_mining.cjs >> $LOG 2>&1
+node scripts/etl/global_mining.cjs >> $LOG 2>&1
+node scripts/etl/commodities.cjs >> $LOG 2>&1

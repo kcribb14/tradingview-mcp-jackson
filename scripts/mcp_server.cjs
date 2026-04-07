@@ -41,6 +41,16 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { min_liquidity: { type: 'number' }, limit: { type: 'number' } } } },
   { name: 'dex_chain_summary', description: 'Summary stats per blockchain (liquidity, volume, token count)',
     inputSchema: { type: 'object', properties: {} } },
+  { name: 'find_miners', description: 'Search mining companies by commodity, stage, exchange, or country',
+    inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, stage: { type: 'string' }, exchange: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'mining_extreme_fear', description: 'Mining stocks in extreme fear (best contrarian entries)',
+    inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, exchange: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'mining_gap_analysis', description: 'Find underrepresented mining segments by commodity and stage',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'commodity_price', description: 'Get commodity reference prices (Gold, Copper, Silver, etc)',
+    inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, days: { type: 'number' } } } },
+  { name: 'mining_company_detail', description: 'Full details for a specific mining company',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' } }, required: ['ticker'] } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -153,6 +163,43 @@ server.setRequestHandler('tools/call', async (req) => {
           FROM dex_tokens GROUP BY chain ORDER BY total_liq_m DESC
         `).all();
         break;
+      case 'find_miners':
+        result = db.prepare(`
+          SELECT mc.ticker, mc.name, mc.exchange, mc.country, mc.primary_commodity, mc.stage,
+                 ROUND(mc.market_cap_aud/1e6, 1) as mcap_m_aud, h.fg_score
+          FROM mining_companies mc
+          LEFT JOIN fg_history h ON h.ticker = mc.ticker AND h.date = (SELECT MAX(date) FROM fg_history WHERE ticker = mc.ticker)
+          WHERE 1=1 ${args.commodity ? "AND mc.primary_commodity = ?" : ''} ${args.stage ? "AND mc.stage = ?" : ''} ${args.exchange ? "AND mc.exchange = ?" : ''}
+          ORDER BY mc.market_cap_aud DESC LIMIT ?
+        `).all(...(args.commodity ? [args.commodity] : []), ...(args.stage ? [args.stage] : []), ...(args.exchange ? [args.exchange] : []), args.limit || 30);
+        break;
+      case 'mining_extreme_fear':
+        result = db.prepare(`
+          SELECT mc.ticker, mc.name, mc.primary_commodity, mc.stage, mc.exchange, h.fg_score, ROUND(mc.market_cap_aud/1e6, 1) as mcap_m_aud
+          FROM mining_companies mc JOIN fg_history h ON h.ticker = mc.ticker
+          WHERE h.date = (SELECT MAX(date) FROM fg_history WHERE ticker = mc.ticker) AND h.fg_score < -10
+          ${args.commodity ? "AND mc.primary_commodity = ?" : ''} ${args.exchange ? "AND mc.exchange = ?" : ''}
+          ORDER BY h.fg_score ASC LIMIT ?
+        `).all(...(args.commodity ? [args.commodity] : []), ...(args.exchange ? [args.exchange] : []), args.limit || 25);
+        break;
+      case 'mining_gap_analysis':
+        result = db.prepare(`
+          SELECT primary_commodity, COUNT(*) as total,
+                 SUM(CASE WHEN stage LIKE 'Producer%' THEN 1 ELSE 0 END) as producers,
+                 SUM(CASE WHEN stage IN ('Explorer','Shell') THEN 1 ELSE 0 END) as explorers
+          FROM mining_companies WHERE primary_commodity IS NOT NULL GROUP BY primary_commodity ORDER BY total ASC
+        `).all();
+        break;
+      case 'commodity_price':
+        result = db.prepare(`SELECT date, price_usd, unit, commodity FROM commodity_prices WHERE 1=1 ${args.commodity ? 'AND commodity = ?' : ''} ORDER BY date DESC LIMIT ?`).all(...(args.commodity ? [args.commodity] : []), args.days || 30);
+        break;
+      case 'mining_company_detail':
+        result = db.prepare(`
+          SELECT mc.*, h.fg_score FROM mining_companies mc
+          LEFT JOIN fg_history h ON h.ticker = mc.ticker AND h.date = (SELECT MAX(date) FROM fg_history WHERE ticker = mc.ticker)
+          WHERE mc.ticker = ?
+        `).all(args.ticker);
+        break;
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -162,6 +209,9 @@ server.setRequestHandler('tools/call', async (req) => {
           filings: db.prepare('SELECT COUNT(*) as n FROM filings').get().n,
           fundamentals: db.prepare('SELECT COUNT(*) as n FROM fundamentals').get().n,
           insider_trades: db.prepare('SELECT COUNT(*) as n FROM insider_trades').get().n,
+          dex_tokens: db.prepare('SELECT COUNT(*) as n FROM dex_tokens').get().n,
+          mining_companies: db.prepare('SELECT COUNT(*) as n FROM mining_companies').get().n,
+          commodity_prices: db.prepare('SELECT COUNT(*) as n FROM commodity_prices').get().n,
         };
         break;
       case 'run_sql':
