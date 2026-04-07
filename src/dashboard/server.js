@@ -380,7 +380,24 @@ app.get('/api/health', (req, res) => {
 const YAHOO_RANGES = { '15': { range: '60d', interval: '15m' }, '60': { range: '2y', interval: '1h' }, '240': { range: '2y', interval: '1d' }, 'D': { range: 'max', interval: '1d' }, 'W': { range: 'max', interval: '1wk' } };
 const BINANCE_INTERVALS = { '15': '15m', '60': '1h', '240': '4h', 'D': '1d', 'W': '1w' };
 
+const HIST_DIR = join(HOME, '.tradingview-mcp', 'cache', 'history');
+
+function loadDeepHistory(symbol) {
+  try {
+    const p = join(HIST_DIR, symbol + '.json');
+    if (!existsSync(p)) return null;
+    const d = JSON.parse(readFileSync(p, 'utf8'));
+    return d.ohlcv || null;
+  } catch { return null; }
+}
+
 async function fetchBars(sym, tf) {
+  // Use cached deep history if available (30+ years daily)
+  if (tf === 'D') {
+    const deep = loadDeepHistory(sym);
+    if (deep && deep.length > 500) return deep;
+  }
+
   const { detectAssetClass } = await import('../core/fg_calibrated.js');
   const cls = detectAssetClass(sym);
   const isCrypto = cls.includes('CRYPTO');

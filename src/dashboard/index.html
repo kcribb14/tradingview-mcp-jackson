@@ -306,6 +306,7 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
     <div style="display:flex;flex:1;min-height:0;flex-direction:column;overflow-y:auto">
       <div class="dm-top" id="dmTop"><div id="tvContainer" style="width:100%;height:100%"></div></div>
       <div class="dm-bot" style="min-height:180px;height:200px"><canvas id="dmFGChart"></canvas></div>
+      <div id="dmHistDepth" style="text-align:center;font-size:10px;color:#555;padding:2px 0"></div>
       <div id="dmCards" style="display:none;padding:10px 16px;gap:10px"></div>
     </div>
   </div>
@@ -1286,6 +1287,15 @@ async function loadFGChart(sym,tf){
           scales:{x:{grid:{display:false},ticks:{color:'#848e9c',maxTicksLimit:8,font:{size:9}}},price:{position:'left',grid:{color:'#1e232920'},ticks:{color:'#848e9c',font:{size:9}}}}}});
       }
       return;
+    }
+    // Show history depth
+    const depthEl=document.getElementById('dmHistDepth');
+    if(depthEl){
+      const bars=d.ohlcv?.length||d.fg?.length||0;
+      const yr=(bars/252).toFixed(1);
+      const t0=d.ohlcv?.[0]?.t||d.fg?.[0]?.t||0;
+      const firstDate=t0>1e12?new Date(t0).getFullYear():t0>0?new Date(t0*1000).getFullYear():'?';
+      depthEl.textContent=bars+' bars ('+yr+' yr) since '+firstDate;
     }
     // Dual-axis: Price (left) + F&G (right) with DGT zone bands
     const fv=d.fg.map(x=>x.v);
