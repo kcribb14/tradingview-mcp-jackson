@@ -95,7 +95,7 @@ function rebuildData() {
       if (!key.endsWith(':D') || entry?.fgScore == null) continue;
       const sym = key.replace(':D', '');
       const cls = detectAssetClass(sym);
-      const cat = { US_LARGE_CAP:'US Large Cap', US_MID_SMALL:'US Mid/Small', ASX_TOP50:'ASX Top 50', ASX_MINING_MID:'ASX Mining Mid', ASX_MINING_MICRO:'ASX Mining Micro', CRYPTO_MAJOR:'Crypto Major', CRYPTO_MID:'Crypto Mid', COMMODITIES:'Commodities', ETFS:'ETFs', INTL_CANADA:'Canada TSX', INTL_LONDON:'London LSE', INTL_HONG_KONG:'Hong Kong', INTL_JAPAN:'Japan', INTL_GERMANY:'Germany', INTL_INDIA:'India', INTL_SOUTH_AFRICA:'South Africa' }[cls] || cls;
+      const cat = { US_LARGE_CAP:'US Large Cap', US_MID_SMALL:'US Mid/Small', ASX_TOP50:'ASX Top 50', ASX_MINING_MID:'ASX Mining Mid', ASX_MINING_MICRO:'ASX Mining Micro', CRYPTO_MAJOR:'Crypto Major', CRYPTO_MID:'Crypto Mid', COMMODITIES:'Commodities', ETFS:'ETFs', FOREX:'Forex', INTL_CANADA:'Canada TSX', INTL_LONDON:'London LSE', INTL_HONG_KONG:'Hong Kong', INTL_JAPAN:'Japan', INTL_GERMANY:'Germany', INTL_INDIA:'India', INTL_SOUTH_AFRICA:'South Africa' }[cls] || cls;
 
       const fg = entry.fgScore;
       const price = entry.lastClose || 0;
@@ -392,17 +392,14 @@ function loadDeepHistory(symbol) {
 }
 
 // SQLite read layer (if available)
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
 let _sqliteDB = null;
-function getSqliteDB() {
-  if (_sqliteDB) return _sqliteDB;
-  try {
-    const Db = (await import('better-sqlite3')).default;
-    _sqliteDB = new Db(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true });
-    return _sqliteDB;
-  } catch { return null; }
-}
-// Eagerly try to load it
-try { const Db = (await import('better-sqlite3')).default; _sqliteDB = new Db(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true }); console.log('SQLite DB loaded:', _sqliteDB.prepare('SELECT COUNT(*) as n FROM prices').get().n, 'price bars'); } catch {}
+try {
+  const Database = _require('better-sqlite3');
+  _sqliteDB = new Database(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true });
+  console.log('SQLite DB loaded:', _sqliteDB.prepare('SELECT COUNT(*) as n FROM prices').get().n, 'price bars');
+} catch (e) { console.warn('SQLite not available:', e.message); }
 
 function fetchBarsFromDB(sym) {
   const db = _sqliteDB;
@@ -1008,8 +1005,9 @@ app.get('/api/sector-comparison', (req, res) => {
       'ASX Mining': ['ASX_MINING_MID','ASX_MINING_MICRO'], 'ASX Blue Chip': ['ASX_TOP50'],
       'Commodities': ['COMMODITIES'], 'ETFs': ['ETFS'], 'DEX': ['DEX_SOLANA','DEX_OTHER'],
       'International': ['CANADA_TSX','LONDON_LSE','HONG_KONG','JAPAN','INDIA','GERMANY','SOUTH_AFRICA'],
+      'Forex': ['FOREX_MAJORS','FOREX_MINORS','FOREX_AUD','FOREX_EXOTIC','FOREX_INDICES'],
     };
-    const SECTOR_COLORS = { Crypto:'#f7931a','US Stocks':'#627eea','ASX Mining':'#ffd700','ASX Blue Chip':'#00bcd4',Commodities:'#4caf50',ETFs:'#9e9e9e',DEX:'#e040fb',International:'#00e5ff' };
+    const SECTOR_COLORS = { Crypto:'#f7931a','US Stocks':'#627eea','ASX Mining':'#ffd700','ASX Blue Chip':'#00bcd4',Commodities:'#4caf50',ETFs:'#9e9e9e',DEX:'#e040fb',International:'#00e5ff',Forex:'#00bfa5' };
     const sectors = {};
     for (const [name, cats] of Object.entries(groups)) {
       let syms = [];

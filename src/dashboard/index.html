@@ -505,7 +505,7 @@ const SECTOR_GROUPS=[
   {label:'DEX',subs:['DEX Solana','DEX Ethereum','DEX Base','DEX Other']},
   {label:'Int\'l',subs:['Canada TSX','London LSE','Hong Kong','Japan','India','Germany','South Africa']},
 ];
-const UNGROUPED=['Commodities','ETFs']; // shown as flat buttons
+const UNGROUPED=['Commodities','ETFs','Forex']; // shown as flat buttons
 
 function renderCatBar(){
   const noSel=selectedCats.size===0&&!cCat&&!showWL;
@@ -2712,7 +2712,8 @@ const ACCORD_SECTORS={
   'Commodities':{cats:['Commodities'],color:'#4caf50',icon:'\uD83D\uDEE2\uFE0F'},
   'ETFs':{cats:['ETFs'],color:'#9e9e9e',icon:'\uD83D\uDCCA'},
   'DEX':{cats:['DEX Solana','DEX Other','DEX Ethereum','DEX Base'],color:'#e040fb',icon:'\uD83D\uDD17'},
-  'International':{cats:['Canada TSX','London LSE','Hong Kong','Japan','India','Germany','South Africa'],color:'#00e5ff',icon:'\uD83C\uDF0D'}
+  'International':{cats:['Canada TSX','London LSE','Hong Kong','Japan','India','Germany','South Africa'],color:'#00e5ff',icon:'\uD83C\uDF0D'},
+  'Forex':{cats:['Forex'],color:'#00bfa5',icon:'\uD83D\uDCB1'}
 };
 
 function buildSectorAccordion(allRows, sectorData){

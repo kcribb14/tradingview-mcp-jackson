@@ -47,6 +47,7 @@ const DEFAULTS = {
   CRYPTO_MID:        { extreme_fear: -4,  fear: -1,  greed: 0,  extreme_greed: 3,  avg: -1,  stddev: 3 },
   COMMODITIES:       { extreme_fear: -18, fear: -9,  greed: 3,  extreme_greed: 14, avg: -3,  stddev: 12 },
   ETFS:              { extreme_fear: -6,  fear: -4,  greed: 4,  extreme_greed: 10, avg: 1,   stddev: 6 },
+  FOREX:             { extreme_fear: -8,  fear: -5,  greed: 5,  extreme_greed: 8,  avg: 0,   stddev: 5 },
 };
 
 function loadThresholds() {

@@ -27,6 +27,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { threshold: { type: 'number' }, category: { type: 'string' }, limit: { type: 'number' } } } },
   { name: 'sector_comparison', description: 'Average and median F&G per sector/category',
     inputSchema: { type: 'object', properties: {} } },
+  { name: 'get_forex_rate', description: 'Get historical forex rate (e.g. EURUSD=X, AUDUSD=X). Returns date + rate.',
+    inputSchema: { type: 'object', properties: { pair: { type: 'string', description: 'Yahoo format e.g. EURUSD=X or just EURUSD' }, days: { type: 'number' } }, required: ['pair'] } },
+  { name: 'forex_fear', description: 'Find forex pairs in extreme fear (oversold currencies)',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'dxy_status', description: 'Get US Dollar Index (DXY) value and 30-day trend',
+    inputSchema: { type: 'object', properties: {} } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -81,6 +87,24 @@ server.setRequestHandler('tools/call', async (req) => {
           JOIN symbols s ON f.ticker = s.ticker
           GROUP BY s.category ORDER BY avg_fg ASC
         `).all();
+        break;
+      case 'get_forex_rate': {
+        const pair = args.pair.toUpperCase().endsWith('=X') ? args.pair.toUpperCase() : args.pair.toUpperCase() + '=X';
+        result = db.prepare('SELECT date, close as rate FROM prices WHERE ticker = ? ORDER BY date DESC LIMIT ?').all(pair, args.days || 30);
+        break;
+      }
+      case 'forex_fear':
+        result = db.prepare(`
+          SELECT s.ticker, h.fg_score, h.zone, h.date
+          FROM fg_history h
+          JOIN (SELECT ticker, MAX(date) as md FROM fg_history GROUP BY ticker) l ON h.ticker = l.ticker AND h.date = l.md
+          JOIN symbols s ON h.ticker = s.ticker
+          WHERE s.asset_class = 'forex' AND h.fg_score < -5
+          ORDER BY h.fg_score ASC
+        `).all();
+        break;
+      case 'dxy_status':
+        result = db.prepare("SELECT date, close as value FROM prices WHERE ticker = 'DX-Y.NYB' ORDER BY date DESC LIMIT 30").all();
         break;
       case 'db_stats':
         result = {
