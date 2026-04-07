@@ -130,6 +130,8 @@ td{padding:5px 10px;white-space:nowrap}.sym{font-weight:600;cursor:pointer;color
   .wg-cell{min-width:0}.wg-chart{height:160px}
   #wgGrid{grid-template-columns:1fr}
   .cmd-gauges{grid-template-columns:1fr 1fr 1fr}
+  #cmdSectorChart{max-height:300px!important}
+  .sig-topbar{gap:4px}.sig-topbar .tb-pill{padding:4px 8px}
 }
 </style>
 </head>
@@ -311,6 +313,16 @@ DGT Fear & Greed Index for 11,000+ symbols. Components: price vs EMA(144), rate 
 
 <script>
 Chart.register(ChartDataLabels);
+
+// Year-aware date labels: "2020" at January, "Apr '21" otherwise
+function makeYearLabels(len){
+  return Array.from({length:len},(_,i)=>{
+    const d=new Date(Date.now()-(len-i)*86400000);
+    const m=d.getMonth(),y=d.getFullYear();
+    if(m===0||i===0)return y.toString();
+    return d.toLocaleDateString('en-AU',{month:'short'})+" '"+y.toString().slice(-2);
+  });
+}
 
 let D={symbols:[],stats:{},categories:[],tfCounts:{}},chart=null,cTF='Daily',cCat=null,sCol='f',sDir=1,curPage=1,pageSize=100;
 let selectedCats=new Set(); // multi-select categories
@@ -1365,7 +1377,7 @@ let _bulkChart=null,_bulkRange='3M',_bulkSyms=[];
 function renderServerBand(data){
   const cv=document.getElementById('bulkOvCv');if(!cv)return;
   const b=data.bands;
-  const labels=b.dates?b.dates.map(ts=>{const d=new Date(ts*1000);return d.toLocaleDateString('en-AU',{year:'2-digit',month:'short'})}):b.median.map((_,i)=>{const d=new Date(Date.now()-(b.median.length-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+  const labels=b.dates?b.dates.map((ts,i)=>{const d=new Date(ts*1000);return d.getMonth()===0||i===0?d.getFullYear().toString():d.toLocaleDateString('en-AU',{month:'short'})+" '"+d.getFullYear().toString().slice(-2)}):makeYearLabels(b.median.length);
   _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets:[
     {data:b.p90,fill:'+1',backgroundColor:'rgba(246,70,93,0.06)',borderWidth:0,pointRadius:0,label:'90th'},
     {data:b.p10,fill:false,borderWidth:0,pointRadius:0,label:'10th'},
@@ -1440,7 +1452,7 @@ async function renderSectorCompare(){
       }
     }
     const maxLen=Math.max(...datasets.map(ds=>ds.data.length),1);
-    const labels=Array.from({length:maxLen},(_,i)=>{const dt=new Date(Date.now()-(maxLen-i)*86400000);return dt.toLocaleDateString('en-AU',{month:'short',year:'2-digit'})});
+    const labels=makeYearLabels(maxLen);
     _bulkChart=new Chart(cv,{type:'line',data:{labels,datasets},plugins:[dgtZoneBands],
       options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
         plugins:{legend:{display:true,position:'top',labels:{color:'#eaecef',font:{size:10},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false},
@@ -1492,7 +1504,7 @@ async function fetchBulkOverlay(syms,mode){
   if(valid.length===0)return;
   const maxLen=Math.max(...valid.map(s=>histories[s].length));
   // Build date labels (approximate)
-  const labels=Array.from({length:maxLen},(_,i)=>{const d=new Date(Date.now()-(maxLen-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+  const labels=makeYearLabels(maxLen);
 
   const cv=document.getElementById('bulkOvCv');if(!cv)return;
   const COLORS=['#f7931a','#627eea','#00ffa3','#f6465d','#f0b90b','#8b5cf6','#06b6d4','#ec4899','#84cc16','#ffffff','#ff6b35','#a78bfa','#14b8a6','#f97316','#6366f1','#d946ef','#0ea5e9','#eab308','#22c55e','#ef4444','#3b82f6','#a855f7','#10b981','#f59e0b','#6ee7b7','#fca5a5','#93c5fd','#c4b5fd','#67e8f9','#fde047'];
@@ -2081,7 +2093,7 @@ async function renderCycleSectorChart(){
     }
     if(!datasets.length)return;
     datasets.forEach(ds=>{const pad=maxLen-ds.data.length;if(pad>0)ds.data=[...Array(pad).fill(null),...ds.data]});
-    const labels=Array.from({length:maxLen},(_,i)=>{const dt=new Date(Date.now()-(maxLen-i)*86400000);return dt.toLocaleDateString('en-AU',{month:'short',day:'numeric'})});
+    const labels=makeYearLabels(maxLen);
     cycleSectorChartInst=new Chart(cv,{type:'line',data:{labels,datasets},plugins:[dgtZoneBands],
       options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
         plugins:{legend:{display:true,position:'bottom',labels:{color:'#888',font:{size:9},usePointStyle:true,pointStyle:'line'}},datalabels:{display:false}},
@@ -2430,8 +2442,8 @@ async function loadSignals(){
     }
     h+='</div></div>';
 
-    // ═══ SECTOR ACCORDION — opportunities grouped by sector ═══
-    h+=buildSectorAccordion(rows, sectorsR.sectors||{});
+    // ═══ SECTOR ACCORDION — populated after render with per-sector data ═══
+    h+='<div id="sectorAccordionDiv"></div>';
 
     // ═══ UNREACTED CATALYSTS ═══
     if(unreactedList.length>0){
@@ -2510,7 +2522,28 @@ async function loadSignals(){
 
     // ═══ RENDER SECTOR CHART ═══
     renderCmdSectorChart(sectorsR);
+
+    // ═══ POPULATE SECTOR ACCORDION — fetch top per sector ═══
+    populateSectorAccordion(sectorsR.sectors||{});
   }catch(e){el.innerHTML='<div style="color:#f6465d;padding:20px">Error: '+e.message+'</div>'}
+}
+
+async function populateSectorAccordion(sectorData){
+  const div=document.getElementById('sectorAccordionDiv');
+  if(!div)return;
+  // Fetch top 5 per sector category using separate small requests
+  const allRows=[];
+  const catList=Object.values(ACCORD_SECTORS).flatMap(s=>s.cats);
+  // Fetch 50 symbols per category group to cover all sectors
+  for(const [name,cfg] of Object.entries(ACCORD_SECTORS)){
+    try{
+      const cats=cfg.cats.map(encodeURIComponent).join(',');
+      const r=await fetch('/api/cached?limit=10&sort=sq&order=desc&categories='+cats);
+      const d=await r.json();
+      if(d.symbols)allRows.push(...d.symbols);
+    }catch{}
+  }
+  div.innerHTML=buildSectorAccordion(allRows, sectorData);
 }
 
 function renderCmdSectorChart(data){
@@ -2526,7 +2559,7 @@ function renderCmdSectorChart(data){
   }
   if(datasets.length===0)return;
   datasets.forEach(ds=>{const pad=maxLen-ds.data.length;if(pad>0)ds.data=Array(pad).fill(null).concat(ds.data)});
-  const labels=Array.from({length:maxLen},(_,i)=>{const d=new Date(Date.now()-(maxLen-i)*86400000);return d.toLocaleDateString('en-AU',{month:'short',year:'2-digit'})});
+  const labels=makeYearLabels(maxLen);
   cmdSectorChartInstance=new Chart(cv,{type:'line',data:{labels,datasets},options:{
     responsive:true,maintainAspectRatio:false,
     interaction:{mode:'index',intersect:false},
