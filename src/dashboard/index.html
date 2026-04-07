@@ -1892,7 +1892,32 @@ async function openDM(sym,cat){
 
   cardsEl.style.display='grid';
   cardsEl.className='dm-cards';
+  // Card: Fundamentals (US stocks only, async)
+  cards+='<div class="dm-card" id="dmFundCard" style="display:none"><div class="dc-title">📊 Fundamentals</div><div id="dmFundContent">Loading...</div></div>';
   cardsEl.innerHTML=cards;
+
+  // Load fundamentals async (only for US stocks)
+  if(!sym.includes('.')&&!sym.includes('=')){
+    fetch('/api/fundamentals/'+encodeURIComponent(sym)).then(r=>r.json()).then(f=>{
+      if(f.error||!f.score)return;
+      const card=document.getElementById('dmFundCard');
+      const el2=document.getElementById('dmFundContent');
+      if(!card||!el2)return;
+      card.style.display='';
+      const gap=f.score-(50+(fg||0));
+      const verdict=gap>30?'HIGH ALPHA — fundamentals strong, market in fear':gap>15?'ALPHA — fundamentals beat sentiment':gap<-30?'OVERVALUED — fundamentals weak vs sentiment':'ALIGNED';
+      const vc=gap>15?'#0ecb81':gap<-15?'#f6465d':'#888';
+      let h2='<div class="dc-row"><span>Score</span><span style="color:#0ecb81;font-weight:700">'+f.score+'/100</span></div>';
+      h2+='<div class="dc-row"><span>Gap vs F&G</span><span style="color:'+vc+';font-weight:600">'+(gap>0?'+':'')+gap+'</span></div>';
+      h2+='<div style="font-size:10px;color:'+vc+';margin:4px 0">'+verdict+'</div>';
+      if(f.factors?.length)h2+='<div style="font-size:10px;color:#aaa">'+f.factors.join(' · ')+'</div>';
+      if(f.revenue)h2+='<div class="dc-row"><span>Revenue</span><span>$'+(f.revenue/1e9).toFixed(1)+'B</span></div>';
+      if(f.eps!=null)h2+='<div class="dc-row"><span>EPS</span><span>$'+f.eps.toFixed(2)+(f.epsSurprise?' ('+f.epsSurprise+')':'')+'</span></div>';
+      if(f.insiderActivity?.trades>0)h2+='<div class="dc-row"><span>Insider</span><span style="color:'+(f.insiderActivity.netBuys>0?'#0ecb81':'#f6465d')+'">'+f.insiderActivity.trades+' trades, net '+(f.insiderActivity.netBuys>0?'+':'')+f.insiderActivity.netBuys+'</span></div>';
+      if(f.recentFilings?.length)h2+='<div style="font-size:10px;margin-top:4px">'+f.recentFilings.slice(0,3).map(fi=>'<a href="'+fi.url+'" target="_blank" style="color:#f0b90b;text-decoration:none;margin-right:6px">'+fi.type+' ('+fi.date+')</a>').join('')+'</div>';
+      el2.innerHTML=h2;
+    }).catch(()=>{});
+  }
 
   // Update price in header
   if(row?.p){

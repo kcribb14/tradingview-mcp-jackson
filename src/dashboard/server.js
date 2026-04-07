@@ -16,6 +16,11 @@ import { loadDexTokens } from '../core/dex_universe.js';
 import { scoreSignal } from '../core/signal_scorer.js';
 import { miningFundamental, cryptoFundamental, stockFundamental, commodityFundamental, calculateGap } from '../core/fundamental_catalysts.js';
 
+// Financial Datasets API — fundamentals, insider trades, SEC filings
+let fd = null;
+try { fd = await import('../data/financial_datasets.js'); if (!fd.isAvailable()) fd = null; } catch { fd = null; }
+if (fd) console.log('Financial Datasets API loaded');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const app = express();
@@ -424,6 +429,14 @@ async function fetchBars(sym, tf) {
     if (bars2.length >= 20) return bars2;
   } catch {}
 
+  // Financial Datasets fallback for US stocks (no rate limits)
+  if (fd && !isCrypto && tf === 'D' && !sym.includes('.') && !sym.includes('=')) {
+    try {
+      const fdBars = await fd.getPrices(sym, 365);
+      if (fdBars.length >= 20) { console.log(`FD filled ${sym}: ${fdBars.length} bars`); return fdBars; }
+    } catch {}
+  }
+
   // CryptoCompare for crypto daily — always try if Binance gave < 2000 bars
   if (isCrypto && tf === 'D' && (!primaryBars || primaryBars.length < 2000)) {
     try {
@@ -460,6 +473,14 @@ async function fetchBars(sym, tf) {
             primaryBars = cgd.map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open: o, high: h, low: l, close: c, volume: 0 }));
         }
       }
+    } catch {}
+  }
+  // Financial Datasets crypto fallback
+  if (fd && isCrypto && tf === 'D' && (!primaryBars || primaryBars.length < 50)) {
+    try {
+      const ccSym = sym.replace(/-USD$/i, '').replace(/USDT$/i, '').toUpperCase();
+      const fdBars = await fd.getCryptoPrices(ccSym + '-USD', 365);
+      if (fdBars.length > (primaryBars?.length || 0)) { console.log(`FD crypto ${sym}: ${fdBars.length} bars`); primaryBars = fdBars; }
     } catch {}
   }
   // Return whatever we got (primaryBars from Binance, or from fallbacks)
@@ -979,6 +1000,61 @@ app.get('/api/geology/:symbol', (req, res) => {
   res.json(geo);
 });
 
+// Fundamentals via Financial Datasets — income, insider, filings, earnings
+app.get('/api/fundamentals/:symbol', async (req, res) => {
+  if (!fd) return res.json({ error: 'Financial Datasets API not configured. Set FINANCIAL_DATASETS_API_KEY.' });
+  const sym = req.params.symbol.toUpperCase();
+  try {
+    const [income, insider, filings, earnings] = await Promise.all([
+      fd.getIncomeStatements(sym, 'quarterly', 4).catch(() => []),
+      fd.getInsiderTrades(sym, 20).catch(() => []),
+      fd.getSecFilings(sym, 10).catch(() => []),
+      fd.getEarnings(sym).catch(() => null),
+    ]);
+
+    let score = 50;
+    const factors = [];
+
+    // Revenue growth
+    if (income.length >= 2 && income[0].revenue && income[1].revenue) {
+      const growth = ((income[0].revenue / income[1].revenue) - 1) * 100;
+      if (growth > 20) { score += 15; factors.push('Revenue +' + growth.toFixed(0) + '%'); }
+      else if (growth > 10) { score += 8; factors.push('Revenue +' + growth.toFixed(0) + '%'); }
+      else if (growth < -10) { score -= 10; factors.push('Revenue ' + growth.toFixed(0) + '%'); }
+    }
+    // Profitability
+    if (income[0]?.net_income > 0) { score += 10; factors.push('Profitable'); }
+    else if (income[0]?.net_income < 0) { score -= 10; factors.push('Loss-making'); }
+    // Margins
+    if (income[0]?.revenue > 0 && income[0]?.gross_profit > 0) {
+      const gm = income[0].gross_profit / income[0].revenue;
+      if (gm > 0.5) { score += 5; factors.push('Gross margin ' + (gm * 100).toFixed(0) + '%'); }
+    }
+    // Insider activity
+    const buys = insider.filter(t => t.transaction_shares > 0).length;
+    const sells = insider.filter(t => t.transaction_shares < 0).length;
+    if (buys > sells * 2 && buys > 2) { score += 10; factors.push(buys + ' insider buys'); }
+    else if (sells > buys * 2 && sells > 3) { score -= 5; factors.push(sells + ' insider sells'); }
+    // Earnings beat
+    if (earnings?.quarterly?.eps_surprise === 'BEAT') { score += 5; factors.push('EPS beat'); }
+    else if (earnings?.quarterly?.eps_surprise === 'MISS') { score -= 5; factors.push('EPS miss'); }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
+    res.json({
+      symbol: sym, score, factors,
+      revenue: income[0]?.revenue || null,
+      netIncome: income[0]?.net_income || null,
+      eps: earnings?.quarterly?.earnings_per_share || null,
+      epsEstimate: earnings?.quarterly?.estimated_earnings_per_share || null,
+      epsSurprise: earnings?.quarterly?.eps_surprise || null,
+      insiderActivity: { trades: insider.length, netBuys: buys - sells },
+      recentFilings: filings.slice(0, 5).map(f => ({ type: f.filing_type, date: f.filing_date, url: f.filing_url || f.url })),
+      latestEarnings: earnings?.quarterly || null,
+    });
+  } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
+});
+
 // Unreacted drill results — highest alpha signals
 app.get('/api/unreacted', (req, res) => {
   const results = [];
@@ -1046,6 +1122,23 @@ app.get('/api/sector/:category', (req, res) => {
     correlation,
     symbols: ranked,
   });
+});
+
+// Earnings calendar — recent earnings for watchlist + top stocks
+app.get('/api/earnings-calendar', async (req, res) => {
+  if (!fd) return res.json({ earnings: [], error: 'FD not configured' });
+  const watchlist = FAVS.slice(0, 10);
+  const top = (MASTER_UNIVERSE.US_LARGE_CAP || []).slice(0, 20);
+  const symbols = [...new Set([...watchlist, ...top])].filter(s => !s.includes('.') && !s.includes('='));
+  const results = [];
+  for (const sym of symbols.slice(0, 15)) {
+    try {
+      const e = await fd.getEarnings(sym);
+      if (e?.quarterly) results.push({ symbol: sym, ...e.quarterly, reportPeriod: e.report_period });
+    } catch {}
+    await new Promise(r => setTimeout(r, 100));
+  }
+  res.json({ earnings: results });
 });
 
 // Trending: biggest movers + whale activity + new high-volume DEX tokens

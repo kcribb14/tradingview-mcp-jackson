@@ -48,3 +48,23 @@ Push notifications: subscribe to `kieran-fg-signals` on ntfy app.
 - `~/.tradingview-mcp/history/` — Daily snapshots
 - `~/.tradingview-mcp/tracking/` — Forward signal tracking
 - `~/.tradingview-mcp/logs/heartbeat.log` — Server health
+
+## Financial Datasets API (Optional but Recommended)
+
+For US stock fundamentals, insider trading, SEC filings, and to bypass Yahoo rate limits:
+
+1. Sign up at https://financialdatasets.ai (free tier available)
+2. Add to `~/.zshrc`:
+   ```bash
+   export FINANCIAL_DATASETS_API_KEY="your_key"
+   ```
+3. Restart the dashboard server
+4. Run backfill: `node scripts/fd_backfill.mjs`
+
+This adds:
+- US stock OHLCV (no rate limits, fills the Yahoo gap)
+- Quarterly financials (income, balance sheet, cash flow)
+- Insider trades (smart money signal)
+- SEC filings (10-K, 10-Q, 8-K alerts)
+- Analyst earnings estimates
+- Crypto prices (alternative to Binance/CryptoCompare)
