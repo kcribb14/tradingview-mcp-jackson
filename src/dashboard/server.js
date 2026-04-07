@@ -1245,6 +1245,32 @@ app.get('/api/earnings-calendar', async (req, res) => {
   res.json({ earnings: results, source: 'fd' });
 });
 
+// DEX hot tokens from SQLite
+app.get('/api/dex-hot', (req, res) => {
+  if (!_sqliteDB) return res.json({ error: 'SQLite not available', extremeFear: [], whaleAccum: [], chainStats: [] });
+  try {
+    const extremeFear = _sqliteDB.prepare(`
+      SELECT t.symbol, t.chain, t.liquidity_usd, t.volume_24h, t.price_change_24h,
+             t.txns_buys_24h, t.txns_sells_24h, t.url, h.fg_score
+      FROM dex_tokens t
+      JOIN symbols s ON UPPER(t.symbol)||'-'||UPPER(t.chain) = s.ticker
+      JOIN fg_history h ON s.ticker = h.ticker
+      WHERE h.fg_score < -20 AND t.liquidity_usd > 100000
+      ORDER BY h.fg_score ASC LIMIT 10
+    `).all();
+    const whaleAccum = _sqliteDB.prepare(`
+      SELECT symbol, chain, liquidity_usd, txns_buys_24h, txns_sells_24h, price_change_24h, url
+      FROM dex_tokens WHERE txns_buys_24h > 100 AND liquidity_usd > 100000
+      AND txns_buys_24h > txns_sells_24h * 2 ORDER BY txns_buys_24h DESC LIMIT 10
+    `).all();
+    const chainStats = _sqliteDB.prepare(`
+      SELECT chain, COUNT(*) as tokens, ROUND(SUM(liquidity_usd)/1e6,1) as liq_m
+      FROM dex_tokens GROUP BY chain ORDER BY liq_m DESC LIMIT 8
+    `).all();
+    res.json({ extremeFear, whaleAccum, chainStats });
+  } catch (e) { res.json({ error: e.message, extremeFear: [], whaleAccum: [], chainStats: [] }); }
+});
+
 // Trending: biggest movers + whale activity + new high-volume DEX tokens
 app.get('/api/trending', (req, res) => {
   const rows = DATA.rows;

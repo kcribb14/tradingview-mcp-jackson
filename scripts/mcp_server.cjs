@@ -33,6 +33,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'dxy_status', description: 'Get US Dollar Index (DXY) value and 30-day trend',
     inputSchema: { type: 'object', properties: {} } },
+  { name: 'dex_extreme_fear', description: 'Find DEX tokens in extreme fear with sufficient liquidity',
+    inputSchema: { type: 'object', properties: { chain: { type: 'string' }, min_liquidity: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'dex_token_search', description: 'Search DEX tokens by symbol or name across all chains',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+  { name: 'dex_whale_buying', description: 'Find DEX tokens with high buy/sell ratio (whale accumulation)',
+    inputSchema: { type: 'object', properties: { min_liquidity: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'dex_chain_summary', description: 'Summary stats per blockchain (liquidity, volume, token count)',
+    inputSchema: { type: 'object', properties: {} } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -105,6 +113,45 @@ server.setRequestHandler('tools/call', async (req) => {
         break;
       case 'dxy_status':
         result = db.prepare("SELECT date, close as value FROM prices WHERE ticker = 'DX-Y.NYB' ORDER BY date DESC LIMIT 30").all();
+        break;
+      case 'dex_extreme_fear':
+        result = db.prepare(`
+          SELECT t.symbol, t.chain, h.fg_score, t.liquidity_usd, t.volume_24h,
+                 t.price_change_24h, t.txns_buys_24h, t.txns_sells_24h, t.url
+          FROM dex_tokens t
+          JOIN symbols s ON UPPER(t.symbol)||'-'||UPPER(t.chain) = s.ticker
+          JOIN fg_history h ON s.ticker = h.ticker
+          WHERE h.fg_score < -20 AND t.liquidity_usd > ?
+          ${args.chain ? "AND t.chain = ?" : ''}
+          ORDER BY h.fg_score ASC LIMIT ?
+        `).all(args.min_liquidity || 50000, ...(args.chain ? [args.chain] : []), args.limit || 30);
+        break;
+      case 'dex_token_search':
+        result = db.prepare(`
+          SELECT symbol, name, chain, liquidity_usd, market_cap, volume_24h,
+                 price_usd, price_change_24h, url
+          FROM dex_tokens WHERE UPPER(symbol) LIKE UPPER(?) OR UPPER(name) LIKE UPPER(?)
+          ORDER BY liquidity_usd DESC LIMIT ?
+        `).all('%' + args.query + '%', '%' + args.query + '%', args.limit || 20);
+        break;
+      case 'dex_whale_buying':
+        result = db.prepare(`
+          SELECT symbol, chain, liquidity_usd, txns_buys_24h, txns_sells_24h,
+                 ROUND(CAST(txns_buys_24h AS REAL) / NULLIF(txns_buys_24h + txns_sells_24h, 0) * 100, 1) as buy_pct,
+                 price_change_24h, url
+          FROM dex_tokens WHERE txns_buys_24h > 100 AND liquidity_usd > ?
+          AND txns_buys_24h > txns_sells_24h * 1.5
+          ORDER BY buy_pct DESC LIMIT ?
+        `).all(args.min_liquidity || 100000, args.limit || 30);
+        break;
+      case 'dex_chain_summary':
+        result = db.prepare(`
+          SELECT chain, COUNT(*) as tokens,
+                 ROUND(SUM(liquidity_usd)/1e6, 1) as total_liq_m,
+                 ROUND(SUM(volume_24h)/1e6, 1) as volume_24h_m,
+                 SUM(txns_buys_24h) as total_buys, SUM(txns_sells_24h) as total_sells
+          FROM dex_tokens GROUP BY chain ORDER BY total_liq_m DESC
+        `).all();
         break;
       case 'db_stats':
         result = {
