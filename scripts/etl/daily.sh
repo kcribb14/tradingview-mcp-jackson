@@ -14,3 +14,7 @@ echo "$(date): Daily ETL complete" >> $LOG
 node scripts/etl/asx_mining.cjs >> $LOG 2>&1
 node scripts/etl/global_mining.cjs >> $LOG 2>&1
 node scripts/etl/commodities.cjs >> $LOG 2>&1
+
+# Intraday (additive)
+node scripts/etl/prices_1h.cjs >> $LOG 2>&1
+node scripts/etl/prices_4h.cjs >> $LOG 2>&1

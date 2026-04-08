@@ -51,6 +51,10 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, days: { type: 'number' } } } },
   { name: 'mining_company_detail', description: 'Full details for a specific mining company',
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' } }, required: ['ticker'] } },
+  { name: 'get_prices_1h', description: 'Get 1-hour OHLCV bars (last 730 days)',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, limit: { type: 'number' } }, required: ['ticker'] } },
+  { name: 'get_prices_4h', description: 'Get 4-hour OHLCV bars (resampled from 1h)',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, limit: { type: 'number' } }, required: ['ticker'] } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -200,6 +204,12 @@ server.setRequestHandler('tools/call', async (req) => {
           WHERE mc.ticker = ?
         `).all(args.ticker);
         break;
+      case 'get_prices_1h':
+        result = db.prepare("SELECT datetime(ts,'unixepoch') as time, open, high, low, close, volume FROM prices_1h WHERE ticker = ? ORDER BY ts DESC LIMIT ?").all(args.ticker, args.limit || 200);
+        break;
+      case 'get_prices_4h':
+        result = db.prepare("SELECT datetime(ts,'unixepoch') as time, open, high, low, close, volume FROM prices_4h WHERE ticker = ? ORDER BY ts DESC LIMIT ?").all(args.ticker, args.limit || 200);
+        break;
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -212,6 +222,8 @@ server.setRequestHandler('tools/call', async (req) => {
           dex_tokens: db.prepare('SELECT COUNT(*) as n FROM dex_tokens').get().n,
           mining_companies: db.prepare('SELECT COUNT(*) as n FROM mining_companies').get().n,
           commodity_prices: db.prepare('SELECT COUNT(*) as n FROM commodity_prices').get().n,
+          prices_1h: db.prepare('SELECT COUNT(*) as n FROM prices_1h').get().n,
+          prices_4h: db.prepare('SELECT COUNT(*) as n FROM prices_4h').get().n,
         };
         break;
       case 'run_sql':
