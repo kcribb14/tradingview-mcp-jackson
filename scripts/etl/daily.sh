@@ -18,3 +18,8 @@ node scripts/etl/commodities.cjs >> $LOG 2>&1
 # Intraday (additive)
 node scripts/etl/prices_1h.cjs >> $LOG 2>&1
 node scripts/etl/prices_4h.cjs >> $LOG 2>&1
+
+# Deep intraday (additive)
+node scripts/etl/intraday_binance.cjs >> $LOG 2>&1
+[ -n "$ALPACA_API_KEY" ] && node scripts/etl/intraday_alpaca.cjs >> $LOG 2>&1
+node scripts/etl/prices_4h.cjs >> $LOG 2>&1
