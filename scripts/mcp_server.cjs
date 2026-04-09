@@ -63,6 +63,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' } }, required: ['ticker'] } },
   { name: 'compute_beta', description: 'Beta, alpha, R-squared vs a benchmark (default SPY)',
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, benchmark: { type: 'string' }, days: { type: 'number' } }, required: ['ticker'] } },
+  { name: 'list_asset_groups', description: 'List all cascade asset groups and their members',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'lag_relationship', description: 'Historical lag pattern between leader and follower — peak correlation, hit rate, magnitude',
+    inputSchema: { type: 'object', properties: { leader: { type: 'string' }, follower: { type: 'string' } }, required: ['leader','follower'] } },
+  { name: 'active_cascade_signals', description: 'Currently active cascade signals — assets primed to move based on leader movement',
+    inputSchema: { type: 'object', properties: { group: { type: 'string' }, min_hit_rate: { type: 'number' } } } },
+  { name: 'cascade_chain_status', description: 'Current state of every asset in a cascade group — who moved, who is primed',
+    inputSchema: { type: 'object', properties: { group: { type: 'string' } }, required: ['group'] } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -266,6 +274,27 @@ server.setRequestHandler('tools/call', async (req) => {
         result = { ticker:t, benchmark:bench, sample:n, beta:beta?Math.round(beta*1000)/1000:null, alpha_annual:alpha?Math.round(alpha*252*1000)/1000:null, r_squared:r2?Math.round(r2*1000)/1000:null };
         break;
       }
+      case 'list_asset_groups':
+        result = db.prepare('SELECT group_name, ticker, position, role FROM asset_groups ORDER BY group_name, position, ticker').all();
+        break;
+      case 'lag_relationship':
+        result = db.prepare('SELECT lag_days, ROUND(correlation,3) as correlation, ROUND(hit_rate,3) as hit_rate, ROUND(avg_follower_move*100,2) as avg_follower_pct, sample_size FROM lag_correlations WHERE ticker_leader = ? AND ticker_follower = ? ORDER BY lag_days').all(args.leader, args.follower);
+        break;
+      case 'active_cascade_signals':
+        result = db.prepare(`SELECT group_name, leader_ticker, ROUND(leader_move_pct*100,2) as leader_pct, leader_move_date, follower_ticker, expected_lag_days, ROUND(expected_follower_move*100,2) as expected_pct, ROUND(hit_rate*100,1) as hit_rate_pct, ROUND(signal_strength,3) as strength FROM cascade_signals WHERE status='active' ${args.min_hit_rate ? 'AND hit_rate >= ?' : ''} ${args.group ? 'AND group_name = ?' : ''} ORDER BY signal_strength DESC`).all(...(args.min_hit_rate ? [args.min_hit_rate] : []), ...(args.group ? [args.group] : []));
+        break;
+      case 'cascade_chain_status': {
+        const members = db.prepare('SELECT ticker, position, role FROM asset_groups WHERE group_name = ? ORDER BY position, ticker').all(args.group);
+        const chain = members.map(m => {
+          const ret = db.prepare("SELECT return_pct FROM returns WHERE ticker = ? AND timeframe = 'D' ORDER BY date_or_ts DESC LIMIT 1").get(m.ticker);
+          const ret5 = db.prepare("SELECT return_pct FROM returns WHERE ticker = ? AND timeframe = 'D' ORDER BY date_or_ts DESC LIMIT 5").all(m.ticker);
+          const fg = db.prepare("SELECT fg_score FROM fg_history WHERE ticker = ? ORDER BY date DESC LIMIT 1").get(m.ticker);
+          const cum5 = ret5.reduce((acc, r) => acc * (1 + r.return_pct), 1) - 1;
+          return { ...m, ret_1d: ret ? Math.round(ret.return_pct * 10000) / 100 : null, ret_5d: Math.round(cum5 * 10000) / 100, fg: fg?.fg_score || null };
+        });
+        result = chain;
+        break;
+      }
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -283,6 +312,9 @@ server.setRequestHandler('tools/call', async (req) => {
           returns: db.prepare('SELECT COUNT(*) as n FROM returns').get().n,
           correlations: db.prepare('SELECT COUNT(*) as n FROM correlations').get().n,
           performance_stats: db.prepare('SELECT COUNT(*) as n FROM performance_stats').get().n,
+          asset_groups: db.prepare('SELECT COUNT(*) as n FROM asset_groups').get().n,
+          lag_correlations: db.prepare('SELECT COUNT(*) as n FROM lag_correlations').get().n,
+          cascade_signals: db.prepare("SELECT COUNT(*) as n FROM cascade_signals WHERE status='active'").get().n,
         };
         break;
       case 'run_sql':

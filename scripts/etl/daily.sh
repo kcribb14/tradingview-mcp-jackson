@@ -26,3 +26,7 @@ node scripts/etl/prices_4h.cjs >> $LOG 2>&1
 
 # Analytics layer (additive)
 node scripts/etl/analytics.cjs >> $LOG 2>&1
+
+# Cascade lead-lag (additive)
+node scripts/etl/lag_correlations.cjs >> $LOG 2>&1
+node scripts/etl/cascade_signals.cjs >> $LOG 2>&1
