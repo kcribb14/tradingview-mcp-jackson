@@ -55,6 +55,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, limit: { type: 'number' } }, required: ['ticker'] } },
   { name: 'get_prices_4h', description: 'Get 4-hour OHLCV bars (resampled from 1h)',
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, limit: { type: 'number' } }, required: ['ticker'] } },
+  { name: 'compute_correlation', description: 'Correlation matrix for a list of tickers (date-aligned, no timestamp bugs)',
+    inputSchema: { type: 'object', properties: { tickers: { type: 'array', items: { type: 'string' } }, timeframe: { type: 'string' }, days: { type: 'number' } }, required: ['tickers'] } },
+  { name: 'compare_performance', description: 'Compare aligned Sharpe, return, vol, max DD across symbols',
+    inputSchema: { type: 'object', properties: { tickers: { type: 'array', items: { type: 'string' } }, lookback_days: { type: 'number' } }, required: ['tickers'] } },
+  { name: 'get_cross_timeframe', description: 'Latest daily + 4h + 1h price, F&G, and performance for one ticker',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' } }, required: ['ticker'] } },
+  { name: 'compute_beta', description: 'Beta, alpha, R-squared vs a benchmark (default SPY)',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, benchmark: { type: 'string' }, days: { type: 'number' } }, required: ['ticker'] } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -210,6 +218,54 @@ server.setRequestHandler('tools/call', async (req) => {
       case 'get_prices_4h':
         result = db.prepare("SELECT datetime(ts,'unixepoch') as time, open, high, low, close, volume FROM prices_4h WHERE ticker = ? ORDER BY ts DESC LIMIT ?").all(args.ticker, args.limit || 200);
         break;
+      case 'compute_correlation': {
+        const tks = args.tickers, tf = args.timeframe || 'D', days = args.days || 90;
+        const cutoff = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+        const matrix = {};
+        for (const a of tks) { matrix[a] = {}; for (const b of tks) {
+          if (a === b) { matrix[a][b] = 1; continue; }
+          const aligned = db.prepare(`SELECT ra.return_pct as ra, rb.return_pct as rb FROM returns ra JOIN returns rb ON ra.date_or_ts = rb.date_or_ts AND ra.timeframe = rb.timeframe WHERE ra.ticker = ? AND rb.ticker = ? AND ra.timeframe = ? AND ra.date_or_ts >= ?`).all(a, b, tf, cutoff);
+          if (aligned.length < 5) { matrix[a][b] = null; continue; }
+          const ra = aligned.map(r => r.ra), rb2 = aligned.map(r => r.rb), n = ra.length;
+          let sa=0,sb=0,saa=0,sbb=0,sab=0;
+          for (let k=0;k<n;k++){sa+=ra[k];sb+=rb2[k];saa+=ra[k]*ra[k];sbb+=rb2[k]*rb2[k];sab+=ra[k]*rb2[k]}
+          const den = Math.sqrt((n*saa-sa*sa)*(n*sbb-sb*sb));
+          matrix[a][b] = den === 0 ? null : Math.round((n*sab-sa*sb)/den*1000)/1000;
+        }}
+        result = { matrix, days, timeframe: tf };
+        break;
+      }
+      case 'compare_performance': {
+        const tks = args.tickers, days = args.lookback_days || 180;
+        const placeholders = tks.map(() => '?').join(',');
+        result = db.prepare(`SELECT ticker, total_return, ann_return, ann_vol, sharpe, max_drawdown, win_rate FROM performance_stats WHERE ticker IN (${placeholders}) AND lookback_days = ? AND timeframe = 'D' ORDER BY sharpe DESC`).all(...tks, days);
+        break;
+      }
+      case 'get_cross_timeframe': {
+        const t = args.ticker;
+        const daily = db.prepare("SELECT date, close FROM prices WHERE ticker = ? ORDER BY date DESC LIMIT 1").all(t);
+        const h1 = db.prepare("SELECT ts, close FROM prices_1h WHERE ticker = ? ORDER BY ts DESC LIMIT 1").all(t);
+        const h4 = db.prepare("SELECT ts, close FROM prices_4h WHERE ticker = ? ORDER BY ts DESC LIMIT 1").all(t);
+        const fg = db.prepare("SELECT date, fg_score, zone FROM fg_history WHERE ticker = ? ORDER BY date DESC LIMIT 1").all(t);
+        const perf = db.prepare("SELECT lookback_days, total_return, sharpe, max_drawdown FROM performance_stats WHERE ticker = ? ORDER BY lookback_days").all(t);
+        result = { ticker: t, daily: daily[0], h1: h1[0], h4: h4[0], fg: fg[0], performance: perf };
+        break;
+      }
+      case 'compute_beta': {
+        const t = args.ticker, bench = args.benchmark || 'SPY', days = args.days || 365;
+        const cutoff = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+        const aligned = db.prepare(`SELECT ra.return_pct as ra, rb.return_pct as rb FROM returns ra JOIN returns rb ON ra.date_or_ts = rb.date_or_ts AND ra.timeframe = rb.timeframe WHERE ra.ticker = ? AND rb.ticker = ? AND ra.timeframe = 'D' AND ra.date_or_ts >= ?`).all(t, bench, cutoff);
+        if (aligned.length < 30) { result = { error: 'Insufficient aligned data', sample: aligned.length }; break; }
+        const n = aligned.length, ra = aligned.map(r=>r.ra), rb2 = aligned.map(r=>r.rb);
+        const mA = ra.reduce((a,b)=>a+b,0)/n, mB = rb2.reduce((a,b)=>a+b,0)/n;
+        let cov=0,vB=0,vA=0;
+        for (let i=0;i<n;i++){cov+=(ra[i]-mA)*(rb2[i]-mB);vB+=(rb2[i]-mB)**2;vA+=(ra[i]-mA)**2}
+        cov/=(n-1);vB/=(n-1);vA/=(n-1);
+        const beta = vB>0?cov/vB:null, alpha = mA-(beta||0)*mB;
+        const r2 = vA>0&&vB>0?(cov*cov)/(vA*vB):null;
+        result = { ticker:t, benchmark:bench, sample:n, beta:beta?Math.round(beta*1000)/1000:null, alpha_annual:alpha?Math.round(alpha*252*1000)/1000:null, r_squared:r2?Math.round(r2*1000)/1000:null };
+        break;
+      }
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -224,6 +280,9 @@ server.setRequestHandler('tools/call', async (req) => {
           commodity_prices: db.prepare('SELECT COUNT(*) as n FROM commodity_prices').get().n,
           prices_1h: db.prepare('SELECT COUNT(*) as n FROM prices_1h').get().n,
           prices_4h: db.prepare('SELECT COUNT(*) as n FROM prices_4h').get().n,
+          returns: db.prepare('SELECT COUNT(*) as n FROM returns').get().n,
+          correlations: db.prepare('SELECT COUNT(*) as n FROM correlations').get().n,
+          performance_stats: db.prepare('SELECT COUNT(*) as n FROM performance_stats').get().n,
         };
         break;
       case 'run_sql':

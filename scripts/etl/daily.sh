@@ -23,3 +23,6 @@ node scripts/etl/prices_4h.cjs >> $LOG 2>&1
 node scripts/etl/intraday_binance.cjs >> $LOG 2>&1
 [ -n "$ALPACA_API_KEY" ] && node scripts/etl/intraday_alpaca.cjs >> $LOG 2>&1
 node scripts/etl/prices_4h.cjs >> $LOG 2>&1
+
+# Analytics layer (additive)
+node scripts/etl/analytics.cjs >> $LOG 2>&1
