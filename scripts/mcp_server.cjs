@@ -93,6 +93,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'pump_scan_current', description: 'Find tokens currently matching the pre-pump profile: deep drawdown + fear + recovery starting.',
     inputSchema: { type: 'object', properties: { source: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'token_onchain_profile', description: 'On-chain profile: metadata, holders, whale trades, exchange listings, social presence',
+    inputSchema: { type: 'object', properties: { symbol: { type: 'string' } }, required: ['symbol'] } },
+  { name: 'whale_activity', description: 'Recent whale trades ($1k+) for a token — shows accumulation vs distribution',
+    inputSchema: { type: 'object', properties: { symbol: { type: 'string' }, days: { type: 'number' }, limit: { type: 'number' } }, required: ['symbol'] } },
+  { name: 'pump_full_profile', description: 'Complete pre-pump profile: price metrics + on-chain metrics combined from 54K+ events',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'exchange_listing_tracker', description: 'Show exchanges for a token, or find tokens on few exchanges (uplist potential)',
+    inputSchema: { type: 'object', properties: { symbol: { type: 'string' }, max_exchanges: { type: 'number' }, limit: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -359,6 +367,30 @@ server.setRequestHandler('tools/call', async (req) => {
         break;
       case 'pump_scan_current':
         result = db.prepare(`WITH recent AS (SELECT ticker, (SELECT close FROM prices p2 WHERE p2.ticker=p1.ticker ORDER BY date DESC LIMIT 1) as price, (SELECT MAX(high) FROM prices p3 WHERE p3.ticker=p1.ticker AND p3.date>date('now','-30 days')) as high30, (SELECT AVG(volume) FROM prices p4 WHERE p4.ticker=p1.ticker AND p4.date>date('now','-7 days')) as avgvol, (SELECT volume FROM prices p5 WHERE p5.ticker=p1.ticker ORDER BY date DESC LIMIT 1) as lastvol, (SELECT fg_score FROM fg_history WHERE ticker=p1.ticker ORDER BY date DESC LIMIT 1) as fg FROM (SELECT DISTINCT ticker FROM prices WHERE date>date('now','-7 days')) p1) SELECT ticker, price, fg, ROUND((price-high30)/NULLIF(high30,0)*100,1) as drawdown, ROUND(lastvol/NULLIF(avgvol,0),1) as vol_ratio FROM recent WHERE high30>0 AND price>0 AND (price-high30)/high30<-0.3 AND fg IS NOT NULL AND fg<-10 ORDER BY drawdown ASC LIMIT ?`).all(args.limit||20);
+        break;
+      case 'token_onchain_profile': {
+        const s = args.symbol.toUpperCase();
+        result = {
+          metadata: db.prepare("SELECT * FROM token_metadata WHERE UPPER(symbol)=? LIMIT 1").all(s),
+          holders: db.prepare("SELECT * FROM holder_snapshots WHERE token_address IN (SELECT token_address FROM token_metadata WHERE UPPER(symbol)=?) ORDER BY snapshot_ts DESC LIMIT 5").all(s),
+          whale_summary: db.prepare("SELECT direction, COUNT(*) as trades, ROUND(SUM(amount_usd),0) as total_usd FROM whale_trades WHERE UPPER(symbol)=? AND timestamp>datetime('now','-7 days') GROUP BY direction").all(s),
+          exchanges: db.prepare("SELECT DISTINCT exchange FROM exchange_listings WHERE UPPER(symbol)=?").all(s),
+          social: db.prepare("SELECT * FROM social_snapshots WHERE token_address IN (SELECT token_address FROM token_metadata WHERE UPPER(symbol)=?) ORDER BY snapshot_ts DESC LIMIT 1").all(s),
+        };
+        break;
+      }
+      case 'whale_activity':
+        result = db.prepare("SELECT timestamp, direction, ROUND(amount_usd,0) as usd, wallet_address, ROUND(price_at_trade,8) as price FROM whale_trades WHERE UPPER(symbol)=? AND timestamp>datetime('now','-'||?||' days') AND amount_usd>=1000 ORDER BY timestamp DESC LIMIT ?").all(args.symbol.toUpperCase(), args.days||7, args.limit||50);
+        break;
+      case 'pump_full_profile':
+        result = db.prepare("SELECT characteristic, ROUND(avg_value,2) as avg, ROUND(median_value,2) as median, ROUND(std_dev,2) as std_dev, sample_count as n, description FROM pump_characteristics ORDER BY characteristic").all();
+        break;
+      case 'exchange_listing_tracker':
+        if (args.symbol) {
+          result = db.prepare("SELECT exchange, listing_type, listing_date, price_at_listing FROM exchange_listings WHERE UPPER(symbol)=? ORDER BY listing_date DESC").all(args.symbol.toUpperCase());
+        } else {
+          result = db.prepare("SELECT tm.symbol, tm.chain, COUNT(DISTINCT el.exchange) as n FROM token_metadata tm LEFT JOIN exchange_listings el ON UPPER(el.symbol)=UPPER(tm.symbol) GROUP BY tm.symbol HAVING n<=? AND n>0 ORDER BY n ASC LIMIT ?").all(args.max_exchanges||3, args.limit||20);
+        }
         break;
       case 'db_stats':
         result = {

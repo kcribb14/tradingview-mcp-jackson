@@ -34,3 +34,8 @@ node scripts/etl/cascade_signals.cjs >> $LOG 2>&1
 # DEX infrastructure (aggregates + TVL)
 node scripts/etl/dex_aggregate.cjs >> $LOG 2>&1
 node scripts/etl/defillama.cjs >> $LOG 2>&1
+
+# On-chain enrichment (when APIs available)
+node scripts/etl/onchain_solana.cjs >> $LOG 2>&1
+node scripts/etl/coingecko_enrich.cjs >> $LOG 2>&1
+node scripts/analysis/enrich_pumps.cjs >> $LOG 2>&1
