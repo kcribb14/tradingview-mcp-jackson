@@ -87,6 +87,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'defi_tvl_query', description: 'Query DeFiLlama protocol TVL data',
     inputSchema: { type: 'object', properties: { protocol: { type: 'string' }, days: { type: 'number' } } } },
+  { name: 'pump_history', description: 'Historical pump events (40%+). Filter by ticker, min size, source. Shows pre-pump drawdown, volume, F&G, and post-pump outcome.',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, min_pump_pct: { type: 'number' }, source: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'pump_characteristics', description: 'Statistical profile of what data looks like BEFORE a pump — avg/median/std for drawdown, volume, volatility, F&G, timing. Derived from 54K+ events.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'pump_scan_current', description: 'Find tokens currently matching the pre-pump profile: deep drawdown + fear + recovery starting.',
+    inputSchema: { type: 'object', properties: { source: { type: 'string' }, limit: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -345,6 +351,15 @@ server.setRequestHandler('tools/call', async (req) => {
       case 'defi_tvl_query':
         result = db.prepare(`SELECT protocol, date, tvl_usd FROM defi_tvl WHERE 1=1 ${args.protocol ? 'AND protocol=?' : ''} ORDER BY date DESC LIMIT ?`).all(...(args.protocol ? [args.protocol] : []), args.days||30);
         break;
+      case 'pump_history':
+        result = db.prepare(`SELECT event_id, ticker, source, pump_date, ROUND(pump_pct,1) as pump_pct, ROUND(pre_7d_return,1) as pre_7d, ROUND(pre_30d_return,1) as pre_30d, ROUND(volume_ratio,1) as vol_ratio, ROUND(pre_7d_volatility,1) as volatility, ROUND(pre_fg_score,1) as fg, ROUND(drawdown_from_high,1) as drawdown, ROUND(post_24h_return,1) as post_24h, ROUND(post_7d_return,1) as post_7d, held_gains FROM pump_events WHERE pump_pct >= ? ${args.ticker ? "AND ticker LIKE '%'||?||'%'" : ''} ${args.source ? 'AND source=?' : ''} ORDER BY pump_pct DESC LIMIT ?`).all(args.min_pump_pct||60, ...(args.ticker?[args.ticker]:[]), ...(args.source?[args.source]:[]), args.limit||50);
+        break;
+      case 'pump_characteristics':
+        result = db.prepare('SELECT characteristic, ROUND(avg_value,2) as avg, ROUND(median_value,2) as median, ROUND(std_dev,2) as std_dev, sample_count as n, description FROM pump_characteristics ORDER BY characteristic').all();
+        break;
+      case 'pump_scan_current':
+        result = db.prepare(`WITH recent AS (SELECT ticker, (SELECT close FROM prices p2 WHERE p2.ticker=p1.ticker ORDER BY date DESC LIMIT 1) as price, (SELECT MAX(high) FROM prices p3 WHERE p3.ticker=p1.ticker AND p3.date>date('now','-30 days')) as high30, (SELECT AVG(volume) FROM prices p4 WHERE p4.ticker=p1.ticker AND p4.date>date('now','-7 days')) as avgvol, (SELECT volume FROM prices p5 WHERE p5.ticker=p1.ticker ORDER BY date DESC LIMIT 1) as lastvol, (SELECT fg_score FROM fg_history WHERE ticker=p1.ticker ORDER BY date DESC LIMIT 1) as fg FROM (SELECT DISTINCT ticker FROM prices WHERE date>date('now','-7 days')) p1) SELECT ticker, price, fg, ROUND((price-high30)/NULLIF(high30,0)*100,1) as drawdown, ROUND(lastvol/NULLIF(avgvol,0),1) as vol_ratio FROM recent WHERE high30>0 AND price>0 AND (price-high30)/high30<-0.3 AND fg IS NOT NULL AND fg<-10 ORDER BY drawdown ASC LIMIT ?`).all(args.limit||20);
+        break;
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -370,6 +385,8 @@ server.setRequestHandler('tools/call', async (req) => {
           dex_daily: db.prepare('SELECT COUNT(*) as n FROM dex_daily').get().n,
           dex_trending: db.prepare('SELECT COUNT(*) as n FROM dex_trending_log').get().n,
           defi_tvl: db.prepare('SELECT COUNT(*) as n FROM defi_tvl').get().n,
+          pump_events: db.prepare('SELECT COUNT(*) as n FROM pump_events').get().n,
+          pump_characteristics: db.prepare('SELECT COUNT(*) as n FROM pump_characteristics').get().n,
         };
         break;
       case 'run_sql':
