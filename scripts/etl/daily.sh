@@ -39,3 +39,9 @@ node scripts/etl/defillama.cjs >> $LOG 2>&1
 node scripts/etl/onchain_solana.cjs >> $LOG 2>&1
 node scripts/etl/coingecko_enrich.cjs >> $LOG 2>&1
 node scripts/analysis/enrich_pumps.cjs >> $LOG 2>&1
+
+# On-chain data (Helius + CoinGecko + derived)
+set -a; source ~/.tradingview-mcp/.env 2>/dev/null; set +a
+[ -n "$HELIUS_API_KEY" ] && node scripts/etl/onchain_helius.cjs >> $LOG 2>&1
+node scripts/etl/coingecko_enrich.cjs >> $LOG 2>&1
+node scripts/analysis/derive_whale_signals.cjs >> $LOG 2>&1
