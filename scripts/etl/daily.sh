@@ -45,3 +45,6 @@ set -a; source ~/.tradingview-mcp/.env 2>/dev/null; set +a
 [ -n "$HELIUS_API_KEY" ] && node scripts/etl/onchain_helius.cjs >> $LOG 2>&1
 node scripts/etl/coingecko_enrich.cjs >> $LOG 2>&1
 node scripts/analysis/derive_whale_signals.cjs >> $LOG 2>&1
+
+# Mining archetype scanner (daily)
+NODE_OPTIONS='--max-old-space-size=1536' node scripts/analysis/full_mining_scanner.cjs >> $LOG 2>&1
