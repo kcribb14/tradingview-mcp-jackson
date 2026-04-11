@@ -71,6 +71,22 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { group: { type: 'string' }, min_hit_rate: { type: 'number' } } } },
   { name: 'cascade_chain_status', description: 'Current state of every asset in a cascade group — who moved, who is primed',
     inputSchema: { type: 'object', properties: { group: { type: 'string' } }, required: ['group'] } },
+  { name: 'dex_token_lookup', description: 'Look up any DEX token by symbol or address across all chains',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, chain: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+  { name: 'dex_token_history', description: 'Daily OHLCV + buy/sell ratio + liquidity history for a DEX token',
+    inputSchema: { type: 'object', properties: { token_address: { type: 'string' }, chain: { type: 'string' }, days: { type: 'number' } }, required: ['token_address'] } },
+  { name: 'dex_snapshot_series', description: 'Raw hourly snapshots — full granularity volume/txn/price data',
+    inputSchema: { type: 'object', properties: { token_address: { type: 'string' }, chain: { type: 'string' }, hours: { type: 'number' } }, required: ['token_address'] } },
+  { name: 'dex_volume_profile2', description: 'Which hours of day a token is most active — session pattern discovery',
+    inputSchema: { type: 'object', properties: { token_address: { type: 'string' }, chain: { type: 'string' } }, required: ['token_address'] } },
+  { name: 'dex_scan2', description: 'Flexible scan: filter by chain, liquidity, volume, buy ratio, price change, age. For discovering tokens matching ANY criteria.',
+    inputSchema: { type: 'object', properties: { chain: { type: 'string' }, min_liquidity: { type: 'number' }, min_volume_24h: { type: 'number' }, min_buy_ratio: { type: 'number' }, max_price_change_24h: { type: 'number' }, sort_by: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'dex_trending_history2', description: 'Tokens that appeared on trending/boost lists — what happened to price after',
+    inputSchema: { type: 'object', properties: { chain: { type: 'string' }, days: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'dex_chain_overview2', description: 'Summary stats per blockchain — tokens, liquidity, volume, buy/sell ratios',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'defi_tvl_query', description: 'Query DeFiLlama protocol TVL data',
+    inputSchema: { type: 'object', properties: { protocol: { type: 'string' }, days: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -295,6 +311,40 @@ server.setRequestHandler('tools/call', async (req) => {
         result = chain;
         break;
       }
+      case 'dex_token_lookup':
+        result = db.prepare(`SELECT r.token_address, r.chain, r.symbol, r.name, r.url, s.price_usd, s.market_cap, s.liquidity_usd, s.volume_24h, s.txns_buys_24h, s.txns_sells_24h, s.price_change_24h FROM dex_registry r LEFT JOIN dex_snapshots s ON r.token_address=s.token_address AND r.chain=s.chain AND s.snapshot_ts=(SELECT MAX(snapshot_ts) FROM dex_snapshots WHERE token_address=r.token_address AND chain=r.chain) WHERE (UPPER(r.symbol) LIKE UPPER(?) OR r.token_address LIKE ?) ${args.chain ? 'AND r.chain=?' : ''} ORDER BY s.liquidity_usd DESC LIMIT ?`).all('%'+args.query+'%', '%'+args.query+'%', ...(args.chain ? [args.chain] : []), args.limit||10);
+        break;
+      case 'dex_token_history':
+        result = db.prepare('SELECT date, open_price, high_price, low_price, close_price, avg_liquidity, total_volume, total_buys, total_sells, buy_sell_ratio, avg_mcap FROM dex_daily WHERE token_address=? AND chain=? ORDER BY date DESC LIMIT ?').all(args.token_address, args.chain||'solana', args.days||30);
+        break;
+      case 'dex_snapshot_series':
+        result = db.prepare("SELECT snapshot_ts, price_usd, market_cap, liquidity_usd, volume_1h, volume_24h, txns_buys_1h, txns_sells_1h, price_change_5m, price_change_1h, price_change_24h FROM dex_snapshots WHERE token_address=? AND chain=? AND snapshot_ts > datetime('now', '-' || ? || ' hours') ORDER BY snapshot_ts ASC").all(args.token_address, args.chain||'solana', args.hours||168);
+        break;
+      case 'dex_volume_profile2':
+        result = db.prepare('SELECT hour_utc, ROUND(avg_volume,0) as avg_vol, ROUND(avg_buys,1) as avg_buys, ROUND(avg_sells,1) as avg_sells, ROUND(avg_price_change,2) as avg_pct, sample_count FROM dex_hourly_profile WHERE token_address=? AND chain=? ORDER BY hour_utc').all(args.token_address, args.chain||'solana');
+        break;
+      case 'dex_scan2': {
+        const conds = ['1=1']; const prms = [];
+        if (args.chain) { conds.push('s.chain=?'); prms.push(args.chain); }
+        if (args.min_liquidity) { conds.push('s.liquidity_usd>=?'); prms.push(args.min_liquidity); }
+        if (args.min_volume_24h) { conds.push('s.volume_24h>=?'); prms.push(args.min_volume_24h); }
+        if (args.min_buy_ratio) { conds.push('CAST(s.txns_buys_24h AS REAL)/NULLIF(s.txns_buys_24h+s.txns_sells_24h,0)>=?'); prms.push(args.min_buy_ratio); }
+        if (args.max_price_change_24h != null) { conds.push('s.price_change_24h<=?'); prms.push(args.max_price_change_24h); }
+        const sortMap = {volume:'s.volume_24h',liquidity:'s.liquidity_usd',mcap:'s.market_cap',buy_ratio:'CAST(s.txns_buys_24h AS REAL)/NULLIF(s.txns_buys_24h+s.txns_sells_24h,0)'};
+        const sort = sortMap[args.sort_by] || 's.volume_24h';
+        prms.push(args.limit||30);
+        result = db.prepare(`SELECT r.symbol, r.chain, r.url, s.price_usd, s.market_cap, s.liquidity_usd, s.volume_24h, s.txns_buys_24h, s.txns_sells_24h, ROUND(CAST(s.txns_buys_24h AS REAL)/NULLIF(s.txns_buys_24h+s.txns_sells_24h,0),3) as buy_ratio, s.price_change_24h, r.token_address FROM dex_snapshots s JOIN dex_registry r ON s.token_address=r.token_address AND s.chain=r.chain WHERE s.snapshot_ts=(SELECT MAX(snapshot_ts) FROM dex_snapshots WHERE token_address=s.token_address AND chain=s.chain) AND ${conds.join(' AND ')} ORDER BY ${sort} DESC LIMIT ?`).all(...prms);
+        break;
+      }
+      case 'dex_trending_history2':
+        result = db.prepare(`SELECT t.symbol, t.chain, t.source, t.trending_at, t.price_at_trending, t.mcap_at_trending, t.liquidity_at_trending, s.price_usd as current_price, ROUND((s.price_usd-t.price_at_trending)/NULLIF(t.price_at_trending,0)*100,1) as pct_since FROM dex_trending_log t LEFT JOIN dex_snapshots s ON t.token_address=s.token_address AND t.chain=s.chain AND s.snapshot_ts=(SELECT MAX(snapshot_ts) FROM dex_snapshots WHERE token_address=t.token_address AND chain=t.chain) WHERE t.trending_at > datetime('now','-'||?||' days') ${args.chain ? 'AND t.chain=?' : ''} ORDER BY t.trending_at DESC LIMIT ?`).all(args.days||7, ...(args.chain ? [args.chain] : []), args.limit||30);
+        break;
+      case 'dex_chain_overview2':
+        result = db.prepare(`SELECT s.chain, COUNT(DISTINCT s.token_address) as tokens, ROUND(SUM(s.liquidity_usd)/1e6,1) as liq_m, ROUND(SUM(s.volume_24h)/1e6,1) as vol_m, ROUND(AVG(CAST(s.txns_buys_24h AS REAL)/NULLIF(s.txns_buys_24h+s.txns_sells_24h,0)),3) as avg_buy_ratio FROM dex_snapshots s WHERE s.snapshot_ts=(SELECT MAX(snapshot_ts) FROM dex_snapshots WHERE token_address=s.token_address AND chain=s.chain) GROUP BY s.chain ORDER BY liq_m DESC`).all();
+        break;
+      case 'defi_tvl_query':
+        result = db.prepare(`SELECT protocol, date, tvl_usd FROM defi_tvl WHERE 1=1 ${args.protocol ? 'AND protocol=?' : ''} ORDER BY date DESC LIMIT ?`).all(...(args.protocol ? [args.protocol] : []), args.days||30);
+        break;
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -315,6 +365,11 @@ server.setRequestHandler('tools/call', async (req) => {
           asset_groups: db.prepare('SELECT COUNT(*) as n FROM asset_groups').get().n,
           lag_correlations: db.prepare('SELECT COUNT(*) as n FROM lag_correlations').get().n,
           cascade_signals: db.prepare("SELECT COUNT(*) as n FROM cascade_signals WHERE status='active'").get().n,
+          dex_registry: db.prepare('SELECT COUNT(*) as n FROM dex_registry').get().n,
+          dex_snapshots: db.prepare('SELECT COUNT(*) as n FROM dex_snapshots').get().n,
+          dex_daily: db.prepare('SELECT COUNT(*) as n FROM dex_daily').get().n,
+          dex_trending: db.prepare('SELECT COUNT(*) as n FROM dex_trending_log').get().n,
+          defi_tvl: db.prepare('SELECT COUNT(*) as n FROM defi_tvl').get().n,
         };
         break;
       case 'run_sql':

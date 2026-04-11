@@ -30,3 +30,7 @@ node scripts/etl/analytics.cjs >> $LOG 2>&1
 # Cascade lead-lag (additive)
 node scripts/etl/lag_correlations.cjs >> $LOG 2>&1
 node scripts/etl/cascade_signals.cjs >> $LOG 2>&1
+
+# DEX infrastructure (aggregates + TVL)
+node scripts/etl/dex_aggregate.cjs >> $LOG 2>&1
+node scripts/etl/defillama.cjs >> $LOG 2>&1
