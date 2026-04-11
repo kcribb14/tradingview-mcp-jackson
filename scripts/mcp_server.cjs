@@ -101,6 +101,24 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'exchange_listing_tracker', description: 'Show exchanges for a token, or find tokens on few exchanges (uplist potential)',
     inputSchema: { type: 'object', properties: { symbol: { type: 'string' }, max_exchanges: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'mining_scanner_latest', description: 'Latest scanner results. Filter by archetype, min_score, commodity.',
+    inputSchema: { type: 'object', properties: { archetype: { type: 'string' }, min_score: { type: 'number' }, commodity: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'mining_scanner_triggered', description: 'Miners with active triggers (volume spike or gap up in last 5 days)',
+    inputSchema: { type: 'object', properties: { min_score: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'mining_scanner_history', description: 'Track a ticker score over time from scanner_results',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, days: { type: 'number' } }, required: ['ticker'] } },
+  { name: 'pump_archetype_stats', description: 'Show 8 mining pump archetypes with historical held%, median pump, risk-adj score',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'session_timing_query', description: 'Query session timing stats (day_of_week, month, exchange patterns)',
+    inputSchema: { type: 'object', properties: { dimension: { type: 'string', description: 'day_of_week, month, or exchange' } } } },
+  { name: 'spillover_tracker', description: 'Cross-exchange spillover events — when a pump on one exchange leads to pumps on others',
+    inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, leader_exchange: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'data_gaps', description: 'Show current data coverage and gaps by category',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'drillhole_exploration', description: 'Query drillhole data by commodity, country, or ticker',
+    inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, commodity: { type: 'string' }, country: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'drilling_trends', description: 'Drilling activity trends — accelerating or dormant by commodity/country',
+    inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, limit: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -392,6 +410,78 @@ server.setRequestHandler('tools/call', async (req) => {
           result = db.prepare("SELECT tm.symbol, tm.chain, COUNT(DISTINCT el.exchange) as n FROM token_metadata tm LEFT JOIN exchange_listings el ON UPPER(el.symbol)=UPPER(tm.symbol) GROUP BY tm.symbol HAVING n<=? AND n>0 ORDER BY n ASC LIMIT ?").all(args.max_exchanges||3, args.limit||20);
         }
         break;
+      case 'mining_scanner_latest': {
+        const conds = ['1=1']; const prms = [];
+        if (args.archetype) { conds.push('archetype=?'); prms.push(args.archetype); }
+        if (args.min_score) { conds.push('score>=?'); prms.push(args.min_score); }
+        if (args.commodity) { conds.push('primary_commodity=?'); prms.push(args.commodity); }
+        prms.push(args.limit || 30);
+        result = db.prepare(`SELECT * FROM scanner_results WHERE scan_date=(SELECT MAX(scan_date) FROM scanner_results) AND ${conds.join(' AND ')} ORDER BY score DESC LIMIT ?`).all(...prms);
+        break;
+      }
+      case 'mining_scanner_triggered':
+        result = db.prepare(`SELECT * FROM scanner_results WHERE scan_date=(SELECT MAX(scan_date) FROM scanner_results) AND (volume_triggered=1 OR gap_up_detected=1) AND score>=? ORDER BY score DESC LIMIT ?`).all(args.min_score || 0, args.limit || 30);
+        break;
+      case 'mining_scanner_history':
+        result = db.prepare(`SELECT scan_date, score, archetype, fg_score, drawdown_pct, volume_ratio, commodity_30d_return, volume_triggered, gap_up_detected, signals FROM scanner_results WHERE ticker=? ORDER BY scan_date DESC LIMIT ?`).all(args.ticker, args.days || 30);
+        break;
+      case 'pump_archetype_stats':
+        result = [
+          { archetype: 'GAP_UP', held_pct: 76, risk_adj: 43.0, med_pump: 56, note: 'BEST HOLD RATE' },
+          { archetype: 'FLAT_BREAKOUT', held_pct: 75, risk_adj: 39.1, med_pump: 52, note: 'EMERGING PATTERN' },
+          { archetype: 'CATCH_UP', held_pct: 72, risk_adj: 37.0, med_pump: 52, note: 'COMMODITY DRIVEN' },
+          { archetype: 'VOLUME_EXPLOSION', held_pct: 70, risk_adj: 38.0, med_pump: 54, note: 'MOST COMMON' },
+          { archetype: 'DEAD_CAT', held_pct: 69, risk_adj: 43.8, med_pump: 64, note: 'HIGHEST RISK-ADJ' },
+          { archetype: 'QUIET_ACCUM', held_pct: 67, risk_adj: 33.5, med_pump: 50, note: 'STEALTH' },
+          { archetype: 'MOMENTUM', held_pct: 66, risk_adj: 33.8, med_pump: 51, note: 'CAUTION - FADES' },
+          { archetype: 'EXTREME_FEAR', held_pct: 57, risk_adj: 29.2, med_pump: 51, note: 'AVOID' },
+        ];
+        break;
+      case 'session_timing_query':
+        result = db.prepare(`SELECT * FROM session_timing_stats ${args.dimension ? 'WHERE dimension=?' : ''} ORDER BY events DESC`).all(...(args.dimension ? [args.dimension] : []));
+        break;
+      case 'spillover_tracker': {
+        const sc = ['1=1']; const sp = [];
+        if (args.commodity) { sc.push('commodity=?'); sp.push(args.commodity); }
+        if (args.leader_exchange) { sc.push('leader_exchange=?'); sp.push(args.leader_exchange); }
+        sp.push(args.limit || 50);
+        result = db.prepare(`SELECT * FROM spillover_events WHERE ${sc.join(' AND ')} ORDER BY leader_pump_date DESC LIMIT ?`).all(...sp);
+        break;
+      }
+      case 'data_gaps': {
+        const totalSymbols = db.prepare('SELECT COUNT(*) as n FROM symbols').get().n;
+        const withPrices = db.prepare('SELECT COUNT(DISTINCT ticker) as n FROM prices').get().n;
+        const withFG = db.prepare('SELECT COUNT(DISTINCT ticker) as n FROM fg_history').get().n;
+        const miners = db.prepare('SELECT COUNT(*) as n FROM mining_companies').get().n;
+        const profiled = db.prepare('SELECT COUNT(*) as n FROM mining_performance').get().n;
+        const commodities = db.prepare('SELECT COUNT(DISTINCT commodity) as n FROM commodity_prices').get().n;
+        result = {
+          symbols: totalSymbols, with_prices: withPrices, with_fg: withFG,
+          price_coverage: Math.round(withPrices / totalSymbols * 1000) / 10 + '%',
+          fg_coverage: Math.round(withFG / totalSymbols * 1000) / 10 + '%',
+          miners_total: miners, miners_profiled: profiled,
+          miner_coverage: Math.round(profiled / miners * 1000) / 10 + '%',
+          commodities_tracked: commodities,
+          stale_tickers: db.prepare("SELECT COUNT(*) as n FROM (SELECT ticker FROM prices GROUP BY ticker HAVING MAX(date) < date('now', '-7 days'))").get().n,
+        };
+        break;
+      }
+      case 'drillhole_exploration': {
+        const dc = ['1=1']; const dp = [];
+        if (args.ticker) { dc.push('cdc.ticker=?'); dp.push(args.ticker); }
+        if (args.commodity) { dc.push('cdc.primary_commodity=?'); dp.push(args.commodity); }
+        dp.push(args.limit || 20);
+        result = db.prepare(`SELECT cdc.ticker, cdc.primary_commodity, cdc.total_drillholes, cdc.total_metres, cdc.countries, cdc.first_drill_year, cdc.last_drill_year, cdc.exploration_intensity FROM company_drillhole_context cdc WHERE ${dc.join(' AND ')} ORDER BY cdc.total_drillholes DESC LIMIT ?`).all(...dp);
+        break;
+      }
+      case 'drilling_trends': {
+        const dtc = []; const dtp = [];
+        if (args.commodity) { dtc.push('ea.commodity=?'); dtp.push(args.commodity); }
+        dtp.push(args.limit || 20);
+        const where = dtc.length > 0 ? 'WHERE ' + dtc.join(' AND ') : '';
+        result = db.prepare(`SELECT ea.commodity, ea.country, ea.year, ea.total_holes, ea.total_metres, ea.active_companies FROM exploration_activity ea ${where} ORDER BY ea.year DESC, ea.total_holes DESC LIMIT ?`).all(...dtp);
+        break;
+      }
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -419,6 +509,13 @@ server.setRequestHandler('tools/call', async (req) => {
           defi_tvl: db.prepare('SELECT COUNT(*) as n FROM defi_tvl').get().n,
           pump_events: db.prepare('SELECT COUNT(*) as n FROM pump_events').get().n,
           pump_characteristics: db.prepare('SELECT COUNT(*) as n FROM pump_characteristics').get().n,
+          mining_pump_events_clean: db.prepare('SELECT COUNT(*) as n FROM mining_pump_events_clean').get().n,
+          scanner_results: db.prepare('SELECT COUNT(*) as n FROM scanner_results').get().n,
+          drillholes: db.prepare('SELECT COUNT(*) as n FROM drillholes').get().n,
+          session_timing_stats: db.prepare('SELECT COUNT(*) as n FROM session_timing_stats').get().n,
+          spillover_events: db.prepare('SELECT COUNT(*) as n FROM spillover_events').get().n,
+          exploration_activity: db.prepare('SELECT COUNT(*) as n FROM exploration_activity').get().n,
+          company_drillhole_context: db.prepare('SELECT COUNT(*) as n FROM company_drillhole_context').get().n,
         };
         break;
       case 'run_sql':

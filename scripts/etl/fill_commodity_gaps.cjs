@@ -23,6 +23,17 @@ const proxies = [
   { commodity: 'Diamonds', ticker: 'TLRY' }, // no good proxy, skip if fails
   { commodity: 'Vanadium', ticker: 'REMX' },
   { commodity: 'Hydrogen', ticker: 'FCEL' },
+  // New from overnight audit — missing commodities
+  { commodity: 'Antimony', ticker: 'REMX' },
+  { commodity: 'Tungsten', ticker: 'REMX' },
+  { commodity: 'Diversified', ticker: 'PICK' },
+  { commodity: 'Helium', ticker: 'NG=F' },
+  { commodity: 'Royalties', ticker: 'GOAU' },
+  { commodity: 'Royalty', ticker: 'GOAU' },
+  { commodity: 'Gold (Royalty)', ticker: 'FNV' },
+  { commodity: 'Silver (Streaming)', ticker: 'WPM' },
+  { commodity: 'Streaming', ticker: 'WPM' },
+  { commodity: 'Zinc', ticker: 'JJM' },  // fallback if ZINC fails
 ];
 
 const insert = db.prepare("INSERT OR IGNORE INTO commodity_prices (commodity, date, price_usd, unit, source) VALUES (?, ?, ?, 'proxy', ?)");
