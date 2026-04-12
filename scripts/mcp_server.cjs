@@ -121,6 +121,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, limit: { type: 'number' } } } },
   { name: 'volume_alerts_recent', description: 'Recent volume spike alerts from the 15-min monitor. Shows ticker, volume ratio, scanner score, archetype.',
     inputSchema: { type: 'object', properties: { days: { type: 'number' }, source: { type: 'string', description: 'mining or dex' }, limit: { type: 'number' } } } },
+  { name: 'ai_screening_latest', description: 'Latest AI screening results from Gemma. Shows ticker, archetype, confidence, thesis, action (alert/watch/avoid).',
+    inputSchema: { type: 'object', properties: { action: { type: 'string', description: 'alert, watch, or avoid' }, min_confidence: { type: 'number' }, limit: { type: 'number' } } } },
+  { name: 'ai_screening_accuracy', description: 'AI screening accuracy stats — how well did Gemma predict 7d/30d outcomes?',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'ai_screener_rerun', description: 'Trigger a fresh AI screening run on top 20 scanner candidates. Returns results when complete.',
+    inputSchema: { type: 'object', properties: { count: { type: 'number', description: 'Number of candidates to screen (default 20)' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -484,6 +490,40 @@ server.setRequestHandler('tools/call', async (req) => {
         result = db.prepare(`SELECT ea.commodity, ea.country, ea.year, ea.total_holes, ea.total_metres, ea.active_companies FROM exploration_activity ea ${where} ORDER BY ea.year DESC, ea.total_holes DESC LIMIT ?`).all(...dtp);
         break;
       }
+      case 'ai_screening_latest': {
+        const aic = ['scan_date = (SELECT MAX(scan_date) FROM ai_screening_results)']; const aip = [];
+        if (args.action) { aic.push('action=?'); aip.push(args.action); }
+        if (args.min_confidence) { aic.push('confidence>=?'); aip.push(args.min_confidence); }
+        aip.push(args.limit || 20);
+        try {
+          result = db.prepare(`SELECT scan_date, ticker, archetype, confidence, thesis, risks, action FROM ai_screening_results WHERE ${aic.join(' AND ')} ORDER BY confidence DESC LIMIT ?`).all(...aip);
+        } catch (e) { result = { error: 'ai_screening_results table may not exist yet. Run ai_screener.cjs first.' }; }
+        break;
+      }
+      case 'ai_screening_accuracy': {
+        try {
+          const outcomes = db.prepare('SELECT * FROM ai_screening_outcomes WHERE actual_7d_return IS NOT NULL').all();
+          if (outcomes.length === 0) { result = { message: 'No outcomes yet — need 7+ days of screening data', first_results_date: new Date(Date.now() + 7*86400000).toISOString().split('T')[0] }; break; }
+          const byAction = {};
+          for (const o of outcomes) {
+            if (!byAction[o.predicted_action]) byAction[o.predicted_action] = [];
+            byAction[o.predicted_action].push(o);
+          }
+          result = { total_outcomes: outcomes.length, by_action: {} };
+          for (const [action, group] of Object.entries(byAction)) {
+            result.by_action[action] = {
+              count: group.length,
+              avg_7d_return: Math.round(group.reduce((s,o)=>s+(o.actual_7d_return||0),0)/group.length*10)/10,
+              pumped_20pct: group.filter(o=>(o.actual_7d_return||0)>=20).length,
+              positive: group.filter(o=>(o.actual_7d_return||0)>0).length,
+            };
+          }
+        } catch (e) { result = { error: 'ai_screening_outcomes table may not exist yet.' }; }
+        break;
+      }
+      case 'ai_screener_rerun':
+        result = { message: 'Run manually: node scripts/analysis/ai_screener.cjs', note: 'Ollama must be running locally. Takes ~5min for 20 candidates.' };
+        break;
       case 'volume_alerts_recent': {
         const vac = ['1=1']; const vap = [];
         if (args.source) { vac.push('source=?'); vap.push(args.source); }
@@ -528,6 +568,8 @@ server.setRequestHandler('tools/call', async (req) => {
           exploration_activity: db.prepare('SELECT COUNT(*) as n FROM exploration_activity').get().n,
           company_drillhole_context: db.prepare('SELECT COUNT(*) as n FROM company_drillhole_context').get().n,
           volume_alerts: db.prepare('SELECT COUNT(*) as n FROM volume_alerts').get().n,
+          ai_screening_results: (() => { try { return db.prepare('SELECT COUNT(*) as n FROM ai_screening_results').get().n; } catch { return 0; } })(),
+          ai_screening_outcomes: (() => { try { return db.prepare('SELECT COUNT(*) as n FROM ai_screening_outcomes').get().n; } catch { return 0; } })(),
         };
         break;
       case 'run_sql':

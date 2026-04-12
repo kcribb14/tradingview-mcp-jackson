@@ -72,8 +72,16 @@ node scripts/analysis/enrich_pump_commodities.cjs >> $LOG 2>&1 || echo "STEP 11 
 echo "$(date): [12/13] Mining archetype scanner" >> $LOG
 NODE_OPTIONS='--max-old-space-size=1536' node scripts/analysis/full_mining_scanner.cjs >> $LOG 2>&1 || echo "STEP 12 FAILED: scanner" >> $LOG
 
-# ── Step 13: Analytics + cascade ──
-echo "$(date): [13/13] Analytics + cascade" >> $LOG
+# ── Step 13: AI screening (after scanner) ──
+echo "$(date): [13/15] AI screener" >> $LOG
+node scripts/analysis/ai_screener.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: ai_screener" >> $LOG
+
+# ── Step 14: Outcome tracking ──
+echo "$(date): [14/15] Outcome tracking" >> $LOG
+node scripts/analysis/track_ai_outcomes.cjs >> $LOG 2>&1 || echo "STEP 14 FAILED: outcome_tracking" >> $LOG
+
+# ── Step 15: Analytics + cascade ──
+echo "$(date): [15/15] Analytics + cascade" >> $LOG
 node scripts/etl/analytics.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: analytics" >> $LOG
 node scripts/etl/lag_correlations.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: lag" >> $LOG
 node scripts/etl/cascade_signals.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: cascade" >> $LOG
