@@ -119,6 +119,8 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { ticker: { type: 'string' }, commodity: { type: 'string' }, country: { type: 'string' }, limit: { type: 'number' } } } },
   { name: 'drilling_trends', description: 'Drilling activity trends — accelerating or dormant by commodity/country',
     inputSchema: { type: 'object', properties: { commodity: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'volume_alerts_recent', description: 'Recent volume spike alerts from the 15-min monitor. Shows ticker, volume ratio, scanner score, archetype.',
+    inputSchema: { type: 'object', properties: { days: { type: 'number' }, source: { type: 'string', description: 'mining or dex' }, limit: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -482,6 +484,15 @@ server.setRequestHandler('tools/call', async (req) => {
         result = db.prepare(`SELECT ea.commodity, ea.country, ea.year, ea.total_holes, ea.total_metres, ea.active_companies FROM exploration_activity ea ${where} ORDER BY ea.year DESC, ea.total_holes DESC LIMIT ?`).all(...dtp);
         break;
       }
+      case 'volume_alerts_recent': {
+        const vac = ['1=1']; const vap = [];
+        if (args.source) { vac.push('source=?'); vap.push(args.source); }
+        const daysBack = args.days || 7;
+        vac.push("alert_date >= date('now', '-' || ? || ' days')"); vap.push(daysBack);
+        vap.push(args.limit || 50);
+        result = db.prepare(`SELECT * FROM volume_alerts WHERE ${vac.join(' AND ')} ORDER BY sent_at DESC LIMIT ?`).all(...vap);
+        break;
+      }
       case 'db_stats':
         result = {
           symbols: db.prepare('SELECT COUNT(*) as n FROM symbols').get().n,
@@ -516,6 +527,7 @@ server.setRequestHandler('tools/call', async (req) => {
           spillover_events: db.prepare('SELECT COUNT(*) as n FROM spillover_events').get().n,
           exploration_activity: db.prepare('SELECT COUNT(*) as n FROM exploration_activity').get().n,
           company_drillhole_context: db.prepare('SELECT COUNT(*) as n FROM company_drillhole_context').get().n,
+          volume_alerts: db.prepare('SELECT COUNT(*) as n FROM volume_alerts').get().n,
         };
         break;
       case 'run_sql':
