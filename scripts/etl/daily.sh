@@ -76,12 +76,17 @@ NODE_OPTIONS='--max-old-space-size=1536' node scripts/analysis/full_mining_scann
 echo "$(date): [13/15] AI screener" >> $LOG
 node scripts/analysis/ai_screener.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: ai_screener" >> $LOG
 
-# ── Step 14: Outcome tracking ──
-echo "$(date): [14/15] Outcome tracking" >> $LOG
-node scripts/analysis/track_ai_outcomes.cjs >> $LOG 2>&1 || echo "STEP 14 FAILED: outcome_tracking" >> $LOG
+# ── Step 14: Outcome tracking (AI + alerts) ──
+echo "$(date): [14/16] Outcome tracking" >> $LOG
+node scripts/analysis/track_ai_outcomes.cjs >> $LOG 2>&1 || echo "STEP 14 FAILED: ai_outcome_tracking" >> $LOG
+node scripts/analysis/track_alert_outcomes.cjs >> $LOG 2>&1 || echo "STEP 14 FAILED: alert_outcome_tracking" >> $LOG
 
-# ── Step 15: Analytics + cascade ──
-echo "$(date): [15/15] Analytics + cascade" >> $LOG
+# ── Step 15: DEX expansion (discover new tokens) ──
+echo "$(date): [15/16] DEX expansion" >> $LOG
+timeout 600 node scripts/etl/dex_expand.cjs >> $LOG 2>&1 || echo "STEP 15 FAILED/TIMEOUT: dex_expand" >> $LOG
+
+# ── Step 16: Analytics + cascade ──
+echo "$(date): [16/16] Analytics + cascade" >> $LOG
 node scripts/etl/analytics.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: analytics" >> $LOG
 node scripts/etl/lag_correlations.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: lag" >> $LOG
 node scripts/etl/cascade_signals.cjs >> $LOG 2>&1 || echo "STEP 13 FAILED: cascade" >> $LOG

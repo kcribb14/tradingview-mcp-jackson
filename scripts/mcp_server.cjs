@@ -127,6 +127,8 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'ai_screener_rerun', description: 'Trigger a fresh AI screening run on top 20 scanner candidates. Returns results when complete.',
     inputSchema: { type: 'object', properties: { count: { type: 'number', description: 'Number of candidates to screen (default 20)' } } } },
+  { name: 'accuracy_report', description: 'Show alert outcome accuracy — 1d/3d/7d returns for volume alerts, AI screening picks, grouped by source and archetype.',
+    inputSchema: { type: 'object', properties: { source: { type: 'string', description: 'mining, dex, or ai_screener' }, days: { type: 'number' } } } },
   { name: 'db_stats', description: 'Show database statistics (row counts per table)',
     inputSchema: { type: 'object', properties: {} } },
   { name: 'run_sql', description: 'Execute a read-only SQL query (SELECT only)',
@@ -524,6 +526,31 @@ server.setRequestHandler('tools/call', async (req) => {
       case 'ai_screener_rerun':
         result = { message: 'Run manually: node scripts/analysis/ai_screener.cjs', note: 'Ollama must be running locally. Takes ~5min for 20 candidates.' };
         break;
+      case 'accuracy_report': {
+        try {
+          const conds = ['1=1']; const prms = [];
+          if (args.source) { conds.push('source=?'); prms.push(args.source); }
+          if (args.days) { conds.push("alert_date >= date('now', '-' || ? || ' days')"); prms.push(args.days); }
+          const outcomes = db.prepare(`SELECT * FROM alert_outcomes WHERE ${conds.join(' AND ')}`).all(...prms);
+          const bySource = {};
+          for (const o of outcomes) {
+            if (!bySource[o.source]) bySource[o.source] = { count: 0, with_returns: 0, pumped_20: 0, returns: [] };
+            bySource[o.source].count++;
+            const ret = o.return_7d || o.return_3d || o.return_1d;
+            if (ret !== null) { bySource[o.source].with_returns++; bySource[o.source].returns.push(ret); }
+            if (o.pumped_20 === 1) bySource[o.source].pumped_20++;
+          }
+          for (const s of Object.values(bySource)) {
+            s.returns.sort((a,b)=>a-b);
+            s.median_return = s.returns.length > 0 ? s.returns[Math.floor(s.returns.length/2)] : null;
+            s.hit_rate = s.with_returns > 0 ? Math.round(s.pumped_20 / s.with_returns * 1000) / 10 + '%' : 'pending';
+            delete s.returns;
+          }
+          const best = [...outcomes].filter(o=>o.return_7d||o.return_3d||o.return_1d).sort((a,b)=>(b.return_7d||b.return_3d||b.return_1d)-(a.return_7d||a.return_3d||a.return_1d)).slice(0,5).map(o=>({ticker:o.ticker,source:o.source,return:o.return_7d||o.return_3d||o.return_1d,archetype:o.archetype}));
+          result = { total_outcomes: outcomes.length, by_source: bySource, best_calls: best };
+        } catch (e) { result = { error: 'alert_outcomes table may not exist. Run track_alert_outcomes.cjs first.', detail: e.message }; }
+        break;
+      }
       case 'volume_alerts_recent': {
         const vac = ['1=1']; const vap = [];
         if (args.source) { vac.push('source=?'); vap.push(args.source); }
@@ -570,6 +597,7 @@ server.setRequestHandler('tools/call', async (req) => {
           volume_alerts: db.prepare('SELECT COUNT(*) as n FROM volume_alerts').get().n,
           ai_screening_results: (() => { try { return db.prepare('SELECT COUNT(*) as n FROM ai_screening_results').get().n; } catch { return 0; } })(),
           ai_screening_outcomes: (() => { try { return db.prepare('SELECT COUNT(*) as n FROM ai_screening_outcomes').get().n; } catch { return 0; } })(),
+          alert_outcomes: (() => { try { return db.prepare('SELECT COUNT(*) as n FROM alert_outcomes').get().n; } catch { return 0; } })(),
         };
         break;
       case 'run_sql':

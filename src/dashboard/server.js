@@ -1853,6 +1853,64 @@ app.get('/api/correlation/:symbol', async (req, res) => {
   } catch (e) { res.json({ error: e.message?.slice(0, 100) }); }
 });
 
+// ─── Accuracy Report ─────────────────────────────────────────────────────────
+
+app.get('/api/accuracy', (req, res) => {
+  try {
+    const Database = _require('better-sqlite3');
+    const adb = new Database(join(HOME, '.tradingview-mcp', 'db', 'fg.db'), { readonly: true });
+
+    const outcomes = adb.prepare("SELECT * FROM alert_outcomes WHERE return_1d IS NOT NULL OR return_3d IS NOT NULL OR return_7d IS NOT NULL").all();
+    const totalAlerts = adb.prepare("SELECT COUNT(*) as n FROM alert_outcomes").get().n;
+
+    const bySource = {};
+    for (const o of outcomes) {
+      if (!bySource[o.source]) bySource[o.source] = [];
+      bySource[o.source].push(o);
+    }
+
+    const sourceStats = {};
+    for (const [src, grp] of Object.entries(bySource)) {
+      const has1d = grp.filter(o => o.return_1d !== null);
+      const has7d = grp.filter(o => o.return_7d !== null);
+      const pumped20 = grp.filter(o => o.pumped_20 === 1).length;
+      const measurable = grp.filter(o => o.pumped_20 !== null).length;
+      sourceStats[src] = {
+        alerts: grp.length,
+        with_1d: has1d.length,
+        with_7d: has7d.length,
+        median_1d: has1d.length > 0 ? has1d.map(o => o.return_1d).sort((a, b) => a - b)[Math.floor(has1d.length / 2)] : null,
+        median_7d: has7d.length > 0 ? has7d.map(o => o.return_7d).sort((a, b) => a - b)[Math.floor(has7d.length / 2)] : null,
+        pumped_20: pumped20,
+        hit_rate: measurable > 0 ? Math.round(pumped20 / measurable * 1000) / 10 : null,
+      };
+    }
+
+    // By archetype
+    const byArch = {};
+    for (const o of outcomes.filter(o => o.archetype)) {
+      if (!byArch[o.archetype]) byArch[o.archetype] = [];
+      byArch[o.archetype].push(o);
+    }
+    const archStats = {};
+    for (const [arch, grp] of Object.entries(byArch)) {
+      const p20 = grp.filter(o => o.pumped_20 === 1).length;
+      const m = grp.filter(o => o.pumped_20 !== null).length;
+      archStats[arch] = { alerts: grp.length, pumped_20: p20, hit_rate: m > 0 ? Math.round(p20 / m * 1000) / 10 : null };
+    }
+
+    // Best/worst
+    const sorted = [...outcomes].sort((a, b) => (b.return_7d || b.return_3d || b.return_1d || 0) - (a.return_7d || a.return_3d || a.return_1d || 0));
+    const best = sorted.slice(0, 5).map(o => ({ ticker: o.ticker, source: o.source, return: o.return_7d || o.return_3d || o.return_1d, archetype: o.archetype }));
+    const worst = sorted.slice(-5).map(o => ({ ticker: o.ticker, source: o.source, return: o.return_7d || o.return_3d || o.return_1d, archetype: o.archetype }));
+
+    adb.close();
+    res.json({ total_alerts: totalAlerts, with_outcomes: outcomes.length, by_source: sourceStats, by_archetype: archStats, best_calls: best, worst_calls: worst });
+  } catch (e) {
+    res.json({ error: e.message, note: 'alert_outcomes table may not exist yet' });
+  }
+});
+
 // ─── Self-healing: crash handlers + heartbeat ────────────────────────────────
 
 function gracefulShutdown(sig) {
